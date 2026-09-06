@@ -32,9 +32,9 @@ class _MainScreenState extends State<MainScreen> {
     super.initState();
     _recarregarTudo();
 
-    // Verificação e atualização automática em segundo plano via GitHub Releases
+    // Verificação obrigatória automática no arranque
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      UpdateService.verificarAtualizacao(context);
+      UpdateService.verificarEForcarAtualizacao(context);
     });
   }
 
@@ -254,12 +254,16 @@ class _MainScreenState extends State<MainScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.system_update, color: Colors.teal),
+              leading: const Icon(Icons.system_update_alt, color: Colors.teal),
               title: const Text('Procurar Atualizações'),
-              subtitle: const Text('Verificar nova versão no GitHub'),
+              subtitle: const Text('Forçar verificação de nova versão no GitHub'),
               onTap: () {
                 Navigator.pop(context);
-                UpdateService.verificarAtualizacao(context);
+                UpdateService.verificarEForcarAtualizacao(
+                  context,
+                  manual: true,
+                  onFeedback: (msg) => setState(() => _mensagemFeedback = msg),
+                );
               },
             ),
             const Divider(),
@@ -322,7 +326,7 @@ class _MainScreenState extends State<MainScreen> {
       ),
       body: Column(
         children: [
-          // Bloco 1: Banco de Horas
+          // Bloco 1: Resumo do Banco de Horas
           Card(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             color: Colors.indigo.shade50,

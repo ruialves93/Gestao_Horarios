@@ -7,24 +7,44 @@ import 'package:path_provider/path_provider.dart';
 import 'package:install_plugin/install_plugin.dart';
 
 class UpdateService {
-  // CONFIGURAÇÃO DO SEU REPOSITÓRIO GITHUB
-  static const String repoOwner = 'ruibarata'; // O seu nome de utilizador no GitHub
-  static const String repoName = 'gestao_horarios'; // Nome do repositório
+  // Ajusta com o teu utilizador e repositório do GitHub
+  static const String repoOwner = 'ruibarata';
+  static const String repoName = 'gestao_horarios';
 
-  static Future<void> verificarAtualizacao(BuildContext context) async {
+  /// Verifica se há atualização.
+  /// Se [manual] for true, mostra feedback se já estiver na versão mais recente.
+  static Future<void> verificarEForcarAtualizacao(
+    BuildContext context, {
+    bool manual = false,
+    Function(String msg)? onFeedback,
+  }) async {
     try {
+      if (manual && onFeedback != null) {
+        onFeedback('A verificar atualizações no GitHub...');
+      }
+
       final url = Uri.parse('https://api.github.com/repos/$repoOwner/$repoName/releases/latest');
       final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});
 
-      if (response.statusCode != 200) return;
+      if (response.statusCode != 200) {
+        if (manual && onFeedback != null) {
+          onFeedback('Não foi possível verificar atualizações (Servidor GitHub inacessível).');
+        }
+        return;
+      }
 
       final data = json.decode(response.body);
       final String tagRemota = data['tag_name']?.toString().replaceAll('v', '').trim() ?? '';
       final List assets = data['assets'] ?? [];
 
-      if (tagRemota.isEmpty || assets.isEmpty) return;
+      if (tagRemota.isEmpty || assets.isEmpty) {
+        if (manual && onFeedback != null) {
+          onFeedback('Nenhum instalador APK disponível na versão remota.');
+        }
+        return;
+      }
 
-      // Encontrar o ficheiro .apk nos anexos do Release
+      // Procura o ficheiro .apk anexado no Release
       String? apkDownloadUrl;
       for (var asset in assets) {
         if (asset['name'].toString().endsWith('.apk')) {
@@ -33,17 +53,28 @@ class UpdateService {
         }
       }
 
-      if (apkDownloadUrl == null) return;
+      if (apkDownloadUrl == null) {
+        if (manual && onFeedback != null) {
+          onFeedback('Ficheiro APK não encontrado na última release.');
+        }
+        return;
+      }
 
       final packageInfo = await PackageInfo.fromPlatform();
       final String versaoLocal = packageInfo.version.trim();
 
       if (_existeNovaVersao(versaoLocal, tagRemota)) {
         if (!context.mounted) return;
-        _iniciarDescarregamentoEInstalacao(context, apkDownloadUrl, tagRemota);
+        _apresentarBloqueioAtualizacaoObrigatoria(context, apkDownloadUrl, versaoLocal, tagRemota);
+      } else {
+        if (manual && onFeedback != null) {
+          onFeedback('A aplicação já se encontra na versão mais recente (v$versaoLocal).');
+        }
       }
-    } catch (_) {
-      // Falha de rede ou repositório offline silenciosa para não incomodar o utilizador
+    } catch (e) {
+      if (manual && onFeedback != null) {
+        onFeedback('Erro ao procurar atualização: $e');
+      }
     }
   }
 
@@ -60,56 +91,135 @@ class UpdateService {
     return false;
   }
 
-  static void _iniciarDescarregamentoEInstalacao(
-      BuildContext context, String url, String versaoNova) {
-    double progresso = 0.0;
-    bool descarregando = true;
-
+  /// Diálogo obrigatório e não descartável que bloqueia a app até atualizar
+  static void _apresentarBloqueioAtualizacaoObrigatoria(
+    BuildContext context,
+    String downloadUrl,
+    String versaoAtual,
+    String novaVersao,
+  ) {
     showDialog(
       context: context,
-      barrierDismissible: false,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            title: Text('A atualizar para v$versaoNova'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(value: progresso > 0 ? progresso : null),
-                const SizedBox(height: 12),
-                Text(
-                  descarregando
-                      ? 'A transferir atualização: ${(progresso * 100).toStringAsFixed(0)}%'
-                      : 'A iniciar instalação...',
-                  style: const TextStyle(fontSize: 13),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
+      barrierDismissible: false, // Impossível fechar tocando fora
+      builder: (dialogContext) {
+        double progresso = 0.0;
+        bool emDownload = false;
+        String statusTexto = 'Uma nova versão está disponível e é necessária para continuar.';
 
-    _descarregarEInstalar(url, (p) {
-      progresso = p;
-    }, () {
-      if (context.mounted) Navigator.pop(context);
-    });
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return PopScope(
+              canPop: false, // Bloqueia o botão/gesto de retroceder do Android
+              child: AlertDialog(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: Row(
+                  children: const [
+                    Icon(Icons.system_update_rounded, color: Colors.orange, size: 28),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Atualização Obrigatória',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                      ),
+                    ),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Versão instalada: v$versaoAtual', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text('Nova versão: v$novaVersao', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.green)),
+                    const SizedBox(height: 12),
+                    Text(statusTexto, style: const TextStyle(fontSize: 13)),
+                    const SizedBox(height: 16),
+                    if (emDownload) ...[
+                      LinearProgressIndicator(
+                        value: progresso > 0 ? progresso : null,
+                        backgroundColor: Colors.grey.shade300,
+                        color: Colors.orange,
+                        minHeight: 8,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Text(
+                          progresso > 0 ? '${(progresso * 100).toStringAsFixed(0)}%' : 'A preparar...',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                actions: [
+                  if (!emDownload)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1A237E),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.download),
+                        label: const Text('Instalar Atualização Agora', style: TextStyle(fontWeight: FontWeight.bold)),
+                        onPressed: () {
+                          setState(() {
+                            emDownload = true;
+                            statusTexto = 'A descarregar a atualização...';
+                          });
+
+                          _descarregarEInstalar(
+                            downloadUrl,
+                            onProgress: (p) {
+                              setState(() {
+                                progresso = p;
+                              });
+                            },
+                            onError: (erro) {
+                              setState(() {
+                                emDownload = false;
+                                statusTexto = 'Erro ao transferir: $erro. Tente novamente.';
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   static Future<void> _descarregarEInstalar(
-      String url, Function(double) onProgress, VoidCallback onFinish) async {
+    String url, {
+    required Function(double) onProgress,
+    required Function(String) onError,
+  }) async {
     try {
       final client = http.Client();
       final request = http.Request('GET', Uri.parse(url));
       final response = await client.send(request);
 
+      if (response.statusCode != 200) {
+        onError('Código HTTP ${response.statusCode}');
+        return;
+      }
+
       final totalBytes = response.contentLength ?? 0;
       int recebidos = 0;
 
       final tempDir = await getTemporaryDirectory();
-      final apkFile = File('${tempDir.path}/app_update.apk');
+      final apkFile = File('${tempDir.path}/update_obrigatorio.apk');
+      if (await apkFile.exists()) {
+        await apkFile.delete();
+      }
+
       final sink = apkFile.openWrite();
 
       await response.stream.listen((chunk) {
@@ -121,12 +231,11 @@ class UpdateService {
       }).asFuture();
 
       await sink.close();
-      onFinish();
 
-      // Dispara a janela de instalação nativa do Android imediatamente
+      // Força a abertura da janela de instalação nativa do Android imediatamente
       await InstallPlugin.install(apkFile.path);
-    } catch (_) {
-      onFinish();
+    } catch (e) {
+      onError(e.toString());
     }
   }
 }
