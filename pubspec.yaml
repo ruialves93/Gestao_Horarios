@@ -1,0 +1,43 @@
+name: Publicar Release APK
+
+on:
+  push:
+    tags:
+      - 'v*' # Dispara automaticamente quando cria uma tag como v1.0.1, v1.0.2, etc.
+
+jobs:
+  build:
+    name: Compilar e Criar Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clonar Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Instalar Dependências
+        run: flutter pub get
+
+      - name: Compilar APK de Release
+        run: flutter build apk --release
+
+      - name: Publicar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/app/outputs/flutter-apk/app-release.apk
+          name: Versão ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
