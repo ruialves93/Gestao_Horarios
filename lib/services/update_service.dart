@@ -4,15 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:install_plugin/install_plugin.dart';
+import 'package:open_filex/open_filex.dart';
 
 class UpdateService {
-  // Ajusta com o teu utilizador e repositório do GitHub
   static const String repoOwner = 'ruibarata';
   static const String repoName = 'gestao_horarios';
 
-  /// Verifica se há atualização.
-  /// Se [manual] for true, mostra feedback se já estiver na versão mais recente.
   static Future<void> verificarEForcarAtualizacao(
     BuildContext context, {
     bool manual = false,
@@ -28,7 +25,7 @@ class UpdateService {
 
       if (response.statusCode != 200) {
         if (manual && onFeedback != null) {
-          onFeedback('Não foi possível verificar atualizações (Servidor GitHub inacessível).');
+          onFeedback('Não foi possível verificar atualizações (GitHub inacessível).');
         }
         return;
       }
@@ -44,7 +41,6 @@ class UpdateService {
         return;
       }
 
-      // Procura o ficheiro .apk anexado no Release
       String? apkDownloadUrl;
       for (var asset in assets) {
         if (asset['name'].toString().endsWith('.apk')) {
@@ -91,7 +87,6 @@ class UpdateService {
     return false;
   }
 
-  /// Diálogo obrigatório e não descartável que bloqueia a app até atualizar
   static void _apresentarBloqueioAtualizacaoObrigatoria(
     BuildContext context,
     String downloadUrl,
@@ -100,7 +95,7 @@ class UpdateService {
   ) {
     showDialog(
       context: context,
-      barrierDismissible: false, // Impossível fechar tocando fora
+      barrierDismissible: false,
       builder: (dialogContext) {
         double progresso = 0.0;
         bool emDownload = false;
@@ -109,7 +104,7 @@ class UpdateService {
         return StatefulBuilder(
           builder: (context, setState) {
             return PopScope(
-              canPop: false, // Bloqueia o botão/gesto de retroceder do Android
+              canPop: false,
               child: AlertDialog(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 title: Row(
@@ -232,8 +227,11 @@ class UpdateService {
 
       await sink.close();
 
-      // Força a abertura da janela de instalação nativa do Android imediatamente
-      await InstallPlugin.install(apkFile.path);
+      // Inicia a instalação com o leitor de pacotes nativo do Android
+      await OpenFilex.open(
+        apkFile.path,
+        type: 'application/vnd.android.package-archive',
+      );
     } catch (e) {
       onError(e.toString());
     }
