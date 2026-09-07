@@ -9,6 +9,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
 class ExportHelper {
+  // --- GERADOR DE PDF 1: RELATÓRIO DO BANCO DE HORAS MENSAL ---
   static Future<File> gerarPDF({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosMes,
@@ -189,6 +190,7 @@ class ExportHelper {
     return file;
   }
 
+  // --- GERADOR DE PDF 2: EXTRATO SALARIAL DETALHADO ---
   static Future<File> gerarPDFValoresReceberDetalhado({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosMes,
@@ -254,7 +256,7 @@ class ExportHelper {
         if (extraPaga > 0) {
           valorExtra = extraPaga * valorHoraBase * 1.25;
           extraPagaStr = '${extraPaga.toStringAsFixed(2)}h';
-          valorExtraStr = '+${valorExtra.toStringAsFixed(2)} €';
+          valorExtraStr = '+${valorExtra.toStringAsFixed(2)} EUR';
           somaHorasExtra += extraPaga;
           somaValorHorasExtra += valorExtra;
         }
@@ -262,18 +264,18 @@ class ExportHelper {
         if (descSalario > 0) {
           valorDesc = descSalario * valorHoraBase;
           descSalarioStr = '${descSalario.toStringAsFixed(2)}h';
-          valorDescStr = '-${valorDesc.toStringAsFixed(2)} €';
+          valorDescStr = '-${valorDesc.toStringAsFixed(2)} EUR';
           somaHorasDesconto += descSalario;
           somaValorDescontos += valorDesc;
         }
 
         double saldoFinDia = valorExtra - valorDesc;
         if (saldoFinDia > 0) {
-          subtotalDiaStr = '+${saldoFinDia.toStringAsFixed(2)} €';
+          subtotalDiaStr = '+${saldoFinDia.toStringAsFixed(2)} EUR';
         } else if (saldoFinDia < 0) {
-          subtotalDiaStr = '${saldoFinDia.toStringAsFixed(2)} €';
+          subtotalDiaStr = '${saldoFinDia.toStringAsFixed(2)} EUR';
         } else if (extraPaga > 0 || descSalario > 0) {
-          subtotalDiaStr = '0.00 €';
+          subtotalDiaStr = '0.00 EUR';
         }
       }
 
@@ -335,9 +337,9 @@ class ExportHelper {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('Salário Base: ${salarioBase.toStringAsFixed(2)} €',
+                      pw.Text('Salário Base: ${salarioBase.toStringAsFixed(2)} EUR',
                           style: const pw.TextStyle(fontSize: 9)),
-                      pw.Text('Valor Hora Base: ${valorHoraBase.toStringAsFixed(2)} €/h',
+                      pw.Text('Valor Hora Base: ${valorHoraBase.toStringAsFixed(2)} EUR/h',
                           style: const pw.TextStyle(fontSize: 9)),
                     ],
                   ),
@@ -345,10 +347,10 @@ class ExportHelper {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                          'Extra Paga (${somaHorasExtra.toStringAsFixed(2)}h): +${somaValorHorasExtra.toStringAsFixed(2)} €',
+                          'Extra Paga (${somaHorasExtra.toStringAsFixed(2)}h): +${somaValorHorasExtra.toStringAsFixed(2)} EUR',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
                       pw.Text(
-                          'Descontos (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} €',
+                          'Descontos (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} EUR',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
                     ],
                   ),
@@ -358,7 +360,7 @@ class ExportHelper {
                     child: pw.Column(
                       children: [
                         pw.Text('TOTAL ESTIMADO', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)),
-                        pw.Text('${totalFinalAReceber.toStringAsFixed(2)} €',
+                        pw.Text('${totalFinalAReceber.toStringAsFixed(2)} EUR',
                             style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
                       ],
                     ),
@@ -376,10 +378,10 @@ class ExportHelper {
                   'TOTAIS',
                   '-',
                   '${somaHorasExtra.toStringAsFixed(2)}h',
-                  '+${somaValorHorasExtra.toStringAsFixed(2)} €',
+                  '+${somaValorHorasExtra.toStringAsFixed(2)} EUR',
                   '${somaHorasDesconto.toStringAsFixed(2)}h',
-                  '-${somaValorDescontos.toStringAsFixed(2)} €',
-                  '${(somaValorHorasExtra - somaValorDescontos) >= 0 ? '+' : ''}${(somaValorHorasExtra - somaValorDescontos).toStringAsFixed(2)} €'
+                  '-${somaValorDescontos.toStringAsFixed(2)} EUR',
+                  '${(somaValorHorasExtra - somaValorDescontos) >= 0 ? '+' : ''}${(somaValorHorasExtra - somaValorDescontos).toStringAsFixed(2)} EUR'
                 ]
               ],
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
@@ -431,6 +433,7 @@ class ExportHelper {
     return file;
   }
 
+  // --- GERADOR DE PDF 3: MAPA DE FÉRIAS ANUAL ---
   static Future<File> gerarPDFMapaFerias({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosAno,
@@ -724,7 +727,7 @@ class ExportHelper {
     return file;
   }
 
-  // --- GERADOR DE PDF 4: RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS ---
+  // --- GERADOR DE PDF 4: RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS (UTILIZA EUR) ---
   static Future<File> gerarPDFResumoAnual({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosAno,
@@ -816,7 +819,6 @@ class ExportHelper {
         }
       }
 
-      // Cálculo rigoroso idêntico ao ecrã principal (Salário Base + Horas Extra + Subsídio de Alimentação - Descontos/Faltas)
       double totalMesIliquido = salarioBase + valorExtraMes - valorDescontoMes + valorSubsidioMes;
       
       totalAnualExtraHoras += horasExtraMes;
@@ -827,11 +829,11 @@ class ExportHelper {
 
       linhasMesesTabela.add([
         nomesMeses[m - 1],
-        '${salarioBase.toStringAsFixed(2)} €',
-        '${horasExtraMes.toStringAsFixed(1)}h (+${valorExtraMes.toStringAsFixed(2)} €)',
-        '-${valorDescontoMes.toStringAsFixed(2)} €',
+        '${salarioBase.toStringAsFixed(2)} EUR',
+        '${horasExtraMes.toStringAsFixed(1)}h (+${valorExtraMes.toStringAsFixed(2)} EUR)',
+        '-${valorDescontoMes.toStringAsFixed(2)} EUR',
         '${diasFeriasMes.toInt()} d',
-        '${totalMesIliquido.toStringAsFixed(2)} €',
+        '${totalMesIliquido.toStringAsFixed(2)} EUR',
       ]);
     }
 
@@ -871,11 +873,11 @@ class ExportHelper {
                 ...linhasMesesTabela,
                 [
                   'TOTAL ANUAL',
-                  '${(salarioBase * 12).toStringAsFixed(2)} €',
-                  '${totalAnualExtraHoras.toStringAsFixed(1)}h (+${totalAnualExtraEuros.toStringAsFixed(2)} €)',
-                  '-${totalAnualDescontoEuros.toStringAsFixed(2)} €',
+                  '${(salarioBase * 12).toStringAsFixed(2)} EUR',
+                  '${totalAnualExtraHoras.toStringAsFixed(1)}h (+${totalAnualExtraEuros.toStringAsFixed(2)} EUR)',
+                  '-${totalAnualDescontoEuros.toStringAsFixed(2)} EUR',
                   '-',
-                  '${totalAnualGanha.toStringAsFixed(2)} €',
+                  '${totalAnualGanha.toStringAsFixed(2)} EUR',
                 ]
               ],
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5, color: PdfColors.white),

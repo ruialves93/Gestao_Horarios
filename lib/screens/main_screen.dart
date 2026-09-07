@@ -30,11 +30,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _inicializarApp() async {
-    // 1. Verifica atualizações no GitHub obrigatoriamente ao abrir a app
     if (mounted) {
       await UpdateService.verificarEForcarAtualizacao(context);
     }
-    // 2. Sincroniza com o Google Drive
     await DriveService.sincronizarAoAbrir((msg) {});
     await _carregarDados();
   }
@@ -310,16 +308,18 @@ class _MainScreenState extends State<MainScreen> {
     String nomeTrabalhador = _perfil['nomeTrabalhador']?.isNotEmpty == true ? _perfil['nomeTrabalhador'] : 'Rui Barata';
     String nomeEmpresa = _perfil['nomeEmpresa']?.isNotEmpty == true ? _perfil['nomeEmpresa'] : 'Gestão de Horários';
 
-    // Cálculo unificado de Horas A/R pagas no mês
-    double totalHorasARPagasMes = 0.0;
+    // Cálculo total de todas as horas extras pagas (semanais e folgas)
+    double totalHorasExtraPagasMes = 0.0;
     _registosMes.forEach((key, reg) {
       double extraPaga = (reg['horasExtraPagas'] as num?)?.toDouble() ?? 0.0;
-      if (extraPaga > 0) totalHorasARPagasMes += extraPaga;
+      if (extraPaga > 0) {
+        totalHorasExtraPagasMes += extraPaga;
+      }
       String tipo = reg['tipoDia']?.toString() ?? '';
       if (tipo == 'Folga Trabalhada') {
         String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? '';
         if (acaoFolga == 'Pagar') {
-          totalHorasARPagasMes += (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          totalHorasExtraPagasMes += (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
         }
       }
     });
@@ -518,7 +518,7 @@ class _MainScreenState extends State<MainScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
                               _buildResumoItem('Salário Base', '${(_totaisGerais['salarioBase'] ?? 0.0).toStringAsFixed(2)}€', Colors.black87),
-                              _buildResumoItem('Horas A/R', '${totalHorasARPagasMes.toStringAsFixed(1)}h', Colors.green.shade800),
+                              _buildResumoItem('Horas Extra', '${totalHorasExtraPagasMes.toStringAsFixed(1)}h', Colors.green.shade800),
                               _buildResumoItem('Subs. Alim.', '${(_totaisGerais['subsidioAlimentacao'] ?? 0.0).toStringAsFixed(2)}€', Colors.brown),
                             ],
                           ),
