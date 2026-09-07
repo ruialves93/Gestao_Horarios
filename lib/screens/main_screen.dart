@@ -308,18 +308,26 @@ class _MainScreenState extends State<MainScreen> {
     String nomeTrabalhador = _perfil['nomeTrabalhador']?.isNotEmpty == true ? _perfil['nomeTrabalhador'] : 'Rui Barata';
     String nomeEmpresa = _perfil['nomeEmpresa']?.isNotEmpty == true ? _perfil['nomeEmpresa'] : 'Gestão de Horários';
 
-    // Cálculo total de todas as horas extras pagas (semanais e folgas)
+    // Cálculo unificado de horas extra (horas e valor monetário em €)
+    double salarioBase = (_perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
+    double valorHoraBase = salarioBase / 174.0;
+
     double totalHorasExtraPagasMes = 0.0;
+    double totalValorExtraMesEuros = 0.0;
+
     _registosMes.forEach((key, reg) {
       double extraPaga = (reg['horasExtraPagas'] as num?)?.toDouble() ?? 0.0;
       if (extraPaga > 0) {
         totalHorasExtraPagasMes += extraPaga;
+        totalValorExtraMesEuros += extraPaga * valorHoraBase * 1.25;
       }
       String tipo = reg['tipoDia']?.toString() ?? '';
       if (tipo == 'Folga Trabalhada') {
         String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? '';
         if (acaoFolga == 'Pagar') {
-          totalHorasExtraPagasMes += (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          totalHorasExtraPagasMes += hEfetivas;
+          totalValorExtraMesEuros += hEfetivas * valorHoraBase * 1.25;
         }
       }
     });
@@ -518,7 +526,7 @@ class _MainScreenState extends State<MainScreen> {
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
                               _buildResumoItem('Salário Base', '${(_totaisGerais['salarioBase'] ?? 0.0).toStringAsFixed(2)}€', Colors.black87),
-                              _buildResumoItem('Horas Extra', '${totalHorasExtraPagasMes.toStringAsFixed(1)}h', Colors.green.shade800),
+                              _buildResumoItem('Horas Extra', '${totalHorasExtraPagasMes.toStringAsFixed(1)}h (${totalValorExtraMesEuros.toStringAsFixed(2)}€)', Colors.green.shade800),
                               _buildResumoItem('Subs. Alim.', '${(_totaisGerais['subsidioAlimentacao'] ?? 0.0).toStringAsFixed(2)}€', Colors.brown),
                             ],
                           ),
@@ -564,7 +572,7 @@ class _MainScreenState extends State<MainScreen> {
       children: [
         Text(titulo, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 2),
-        Text(valor, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: cor)),
+        Text(valor, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: cor)),
       ],
     );
   }
