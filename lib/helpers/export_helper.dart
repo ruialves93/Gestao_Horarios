@@ -9,7 +9,6 @@ import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 
 class ExportHelper {
-  // --- GERADOR DE PDF 1: RELATÓRIO DO BANCO DE HORAS MENSAL ---
   static Future<File> gerarPDF({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosMes,
@@ -20,7 +19,7 @@ class ExportHelper {
       title: 'Relatório Mensal do Banco de Horas',
       author: 'Rui Barata',
       creator: 'Gestão de Horários - Rui Barata © 2026',
-      subject: 'Código do Trabalho - Lei n.º 7/2009',
+      subject: 'Código do Trabalho (Lei n.º 7/2009)',
     );
     pw.MemoryImage? imageLogo;
 
@@ -35,11 +34,9 @@ class ExportHelper {
     ];
     String nomeMesStr = nomesMeses[mes - 1];
 
-    double salarioBase = (perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
-    double valorHoraBase = salarioBase / 174.0;
-
     double totalHorasExtraMes = 0.0;
-    double totalValorExtraMes = 0.0;
+    double totalHorasDescontarMes = 0.0;
+    double totalHorasEfetivasMes = 0.0;
 
     final List<List<String>> linhasTabela = [];
     int totalDiasMes = DateUtils.getDaysInMonth(ano, mes);
@@ -56,39 +53,36 @@ class ExportHelper {
       String saida = '-';
       String almoco = '-';
       String horasExtraTexto = '-';
-      String valorTexto = '-';
+      String horasDescontarTexto = '-';
 
       if (reg.isNotEmpty) {
-        entrada = reg['horaInicio']?.toString() ?? '-';
-        saida = reg['horaFim']?.toString() ?? '-';
+        String tipo = reg['tipoDia']?.toString() ?? 'Trabalho';
+        if (tipo == 'Trabalho' || tipo == 'Folga Trabalhada') {
+          entrada = reg['horaInicio']?.toString() ?? '-';
+          saida = reg['horaFim']?.toString() ?? '-';
 
-        if (reg['horaAlmocoInicio'] != null && reg['horaAlmocoFim'] != null) {
-          almoco = '${reg['horaAlmocoInicio']} - ${reg['horaAlmocoFim']}';
-        }
-
-        double credito = (reg['horasCreditoBanco'] as num?)?.toDouble() ?? 0.0;
-        double debito = (reg['horasDebitoBanco'] as num?)?.toDouble() ?? 0.0;
-        double extraPaga = (reg['horasExtraPagas'] as num?)?.toDouble() ?? 0.0;
-
-        if (credito > 0) {
-          horasExtraTexto = '+${credito.toStringAsFixed(2)}h';
-          totalHorasExtraMes += credito;
-          if (extraPaga > 0) {
-            double val = extraPaga * valorHoraBase * 1.25;
-            totalValorExtraMes += val;
-            valorTexto = '${val.toStringAsFixed(2)} EUR';
-          } else {
-            valorTexto = 'B. Horas';
+          if (reg['almocoInicio'] != null && reg['almocoFim'] != null) {
+            almoco = '${reg['almocoInicio']} - ${reg['almocoFim']}';
           }
-        } else if (debito > 0) {
-          horasExtraTexto = '-${debito.toStringAsFixed(2)}h (falta)';
-          valorTexto = '0.00 EUR';
-        } else if (extraPaga > 0) {
-          horasExtraTexto = '+${extraPaga.toStringAsFixed(2)}h';
-          totalHorasExtraMes += extraPaga;
-          double val = extraPaga * valorHoraBase * 1.25;
-          totalValorExtraMes += val;
-          valorTexto = '${val.toStringAsFixed(2)} EUR';
+
+          double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          double diff = hEfetivas - hContratadas;
+
+          totalHorasEfetivasMes += hEfetivas;
+
+          if (diff > 0.01) {
+            horasExtraTexto = '+${diff.toStringAsFixed(2)}h';
+            totalHorasExtraMes += diff;
+          } else if (diff < -0.01) {
+            horasDescontarTexto = '-${diff.abs().toStringAsFixed(2)}h';
+            totalHorasDescontarMes += diff.abs();
+          }
+        } else if (tipo == 'Falta') {
+          horasDescontarTexto = 'Falta';
+          totalHorasDescontarMes += 8.0;
+        } else {
+          entrada = tipo; 
         }
       }
 
@@ -98,9 +92,11 @@ class ExportHelper {
         saida,
         almoco,
         horasExtraTexto,
-        valorTexto,
+        horasDescontarTexto,
       ]);
     }
+
+    double bancoHorasLiquido = totalHorasExtraMes - totalHorasDescontarMes;
 
     pdf.addPage(
       pw.MultiPage(
@@ -115,46 +111,70 @@ class ExportHelper {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text('Relatório de Banco de Horas Mensal',
-                        style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                        style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold, color: PdfColors.indigo900)),
                     pw.Text('Período: $nomeMesStr de $ano', style: const pw.TextStyle(fontSize: 11)),
                     pw.Text('Trabalhador: ${perfil['nomeTrabalhador'] ?? ''} | Empresa: ${perfil['nomeEmpresa'] ?? ''}',
                         style: const pw.TextStyle(fontSize: 10)),
-                    pw.Text('Desenvolvimento por Rui Barata © 2026',
-                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
-                    pw.Text('Enquadramento: Código do Trabalho (Lei n.º 7/2009, art.º 208.º - Banco de Horas)',
-                        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
+                    pw.Text('Desenvolvimento por Rui Barata © 2026 (Inalterável)',
+                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
                   ],
                 ),
                 if (imageLogo != null) pw.ClipOval(child: pw.Image(imageLogo, width: 44, height: 44)),
               ],
             ),
             pw.Divider(thickness: 1),
-            pw.SizedBox(height: 10),
+            pw.SizedBox(height: 8),
+
             pw.Table.fromTextArray(
-              headers: ['Dia', 'Entrada', 'Saída', 'Intervalo Almoço', 'Banco / Extra', 'Valor Extra'],
-              data: [
-                ...linhasTabela,
-                [
-                  'TOTAL',
-                  '',
-                  '',
-                  '',
-                  '${totalHorasExtraMes.toStringAsFixed(2)}h',
-                  '${totalValorExtraMes.toStringAsFixed(2)} EUR'
-                ]
-              ],
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 10, color: PdfColors.white),
+              headers: ['Dias', 'Entrada', 'Saída', 'Almoço', 'Horas Extra', 'Horas a Descontar'],
+              data: [...linhasTabela],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9, color: PdfColors.white),
               headerDecoration: const pw.BoxDecoration(color: PdfColors.indigo900),
-              cellStyle: const pw.TextStyle(fontSize: 9),
+              cellStyle: const pw.TextStyle(fontSize: 8.5),
               cellAlignment: pw.Alignment.center,
+            ),
+            pw.SizedBox(height: 14),
+
+            pw.Container(
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.grey100,
+                border: pw.Border.all(color: PdfColors.indigo900, width: 1),
+                borderRadius: pw.BorderRadius.circular(6),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('RESUMO MENSAL DO BANCO DE HORAS',
+                      style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: PdfColors.indigo900)),
+                  pw.SizedBox(height: 6),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('• Total de Horas Extras: +${totalHorasExtraMes.toStringAsFixed(2)}h', style: const pw.TextStyle(fontSize: 9)),
+                      pw.Text('• Total de Horas a Descontar: -${totalHorasDescontarMes.toStringAsFixed(2)}h', style: const pw.TextStyle(fontSize: 9)),
+                    ],
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text('• Banco de Horas Líquido: ${bancoHorasLiquido >= 0 ? '+' : ''}${bancoHorasLiquido.toStringAsFixed(2)}h',
+                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                      pw.Text('• Total de Horas Efetivas: ${totalHorasEfetivasMes.toStringAsFixed(2)}h',
+                          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
+                    ],
+                  ),
+                ],
+              ),
             ),
             pw.SizedBox(height: 16),
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Documento digital autêntico - Proibida a edição e modificação de dados.',
+                pw.Text('Conforme normas da Lei n.º 7/2009 (Código do Trabalho)',
                     style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
-                pw.Text('Desenvolvimento por Rui Barata © 2026',
+                pw.Text('Rui Barata © 2026',
                     style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
               ],
             ),
@@ -164,12 +184,11 @@ class ExportHelper {
     );
 
     final dir = await getTemporaryDirectory();
-    final file = File(p.join(dir.path, 'relatorio_banco_horas_mensal.pdf'));
+    final file = File(p.join(dir.path, 'banco_horas_mensal_${ano}_$mes.pdf'));
     await file.writeAsBytes(await pdf.save());
     return file;
   }
 
-  // --- GERADOR DE PDF 2: RELATÓRIO FINANCEIRO E SALARIAL DETALHADO POR DIA ---
   static Future<File> gerarPDFValoresReceberDetalhado({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosMes,
@@ -235,7 +254,7 @@ class ExportHelper {
         if (extraPaga > 0) {
           valorExtra = extraPaga * valorHoraBase * 1.25;
           extraPagaStr = '${extraPaga.toStringAsFixed(2)}h';
-          valorExtraStr = '+${valorExtra.toStringAsFixed(2)} EUR';
+          valorExtraStr = '+${valorExtra.toStringAsFixed(2)} €';
           somaHorasExtra += extraPaga;
           somaValorHorasExtra += valorExtra;
         }
@@ -243,18 +262,18 @@ class ExportHelper {
         if (descSalario > 0) {
           valorDesc = descSalario * valorHoraBase;
           descSalarioStr = '${descSalario.toStringAsFixed(2)}h';
-          valorDescStr = '-${valorDesc.toStringAsFixed(2)} EUR';
+          valorDescStr = '-${valorDesc.toStringAsFixed(2)} €';
           somaHorasDesconto += descSalario;
           somaValorDescontos += valorDesc;
         }
 
         double saldoFinDia = valorExtra - valorDesc;
         if (saldoFinDia > 0) {
-          subtotalDiaStr = '+${saldoFinDia.toStringAsFixed(2)} EUR';
+          subtotalDiaStr = '+${saldoFinDia.toStringAsFixed(2)} €';
         } else if (saldoFinDia < 0) {
-          subtotalDiaStr = '${saldoFinDia.toStringAsFixed(2)} EUR';
+          subtotalDiaStr = '${saldoFinDia.toStringAsFixed(2)} €';
         } else if (extraPaga > 0 || descSalario > 0) {
-          subtotalDiaStr = '0.00 EUR';
+          subtotalDiaStr = '0.00 €';
         }
       }
 
@@ -316,9 +335,9 @@ class ExportHelper {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      pw.Text('Salário Base: ${salarioBase.toStringAsFixed(2)} EUR',
+                      pw.Text('Salário Base: ${salarioBase.toStringAsFixed(2)} €',
                           style: const pw.TextStyle(fontSize: 9)),
-                      pw.Text('Valor Hora Base: ${valorHoraBase.toStringAsFixed(2)} EUR/h',
+                      pw.Text('Valor Hora Base: ${valorHoraBase.toStringAsFixed(2)} €/h',
                           style: const pw.TextStyle(fontSize: 9)),
                     ],
                   ),
@@ -326,10 +345,10 @@ class ExportHelper {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                          'Extra Paga (${somaHorasExtra.toStringAsFixed(2)}h): +${somaValorHorasExtra.toStringAsFixed(2)} EUR',
+                          'Extra Paga (${somaHorasExtra.toStringAsFixed(2)}h): +${somaValorHorasExtra.toStringAsFixed(2)} €',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
                       pw.Text(
-                          'Descontos (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} EUR',
+                          'Descontos (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} €',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
                     ],
                   ),
@@ -339,7 +358,7 @@ class ExportHelper {
                     child: pw.Column(
                       children: [
                         pw.Text('TOTAL ESTIMADO', style: pw.TextStyle(fontSize: 8, color: PdfColors.white)),
-                        pw.Text('${totalFinalAReceber.toStringAsFixed(2)} EUR',
+                        pw.Text('${totalFinalAReceber.toStringAsFixed(2)} €',
                             style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
                       ],
                     ),
@@ -357,10 +376,10 @@ class ExportHelper {
                   'TOTAIS',
                   '-',
                   '${somaHorasExtra.toStringAsFixed(2)}h',
-                  '+${somaValorHorasExtra.toStringAsFixed(2)} EUR',
+                  '+${somaValorHorasExtra.toStringAsFixed(2)} €',
                   '${somaHorasDesconto.toStringAsFixed(2)}h',
-                  '-${somaValorDescontos.toStringAsFixed(2)} EUR',
-                  '${(somaValorHorasExtra - somaValorDescontos) >= 0 ? '+' : ''}${(somaValorHorasExtra - somaValorDescontos).toStringAsFixed(2)} EUR'
+                  '-${somaValorDescontos.toStringAsFixed(2)} €',
+                  '${(somaValorHorasExtra - somaValorDescontos) >= 0 ? '+' : ''}${(somaValorHorasExtra - somaValorDescontos).toStringAsFixed(2)} €'
                 ]
               ],
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
@@ -412,7 +431,6 @@ class ExportHelper {
     return file;
   }
 
-  // --- GERADOR DE PDF 3: MAPA DE FÉRIAS ANUAL (CALENDÁRIO DETALHADO POR MÊS E ANO) ---
   static Future<File> gerarPDFMapaFerias({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosAno,
@@ -450,11 +468,10 @@ class ExportHelper {
     final dataHora =
         "${agora.day.toString().padLeft(2, '0')}/${agora.month.toString().padLeft(2, '0')}/${agora.year} às ${agora.hour.toString().padLeft(2, '0')}:${agora.minute.toString().padLeft(2, '0')}";
 
-    // Construtor do Mini-Calendário de Cada Mês
     pw.Widget buildCalendarioMes(int mes) {
       int totalDias = DateUtils.getDaysInMonth(ano, mes);
       DateTime primeiroDia = DateTime(ano, mes, 1);
-      int offsetInicio = primeiroDia.weekday - 1; // 0 = Seg, 6 = Dom
+      int offsetInicio = primeiroDia.weekday - 1;
 
       int feriasDoMes = 0;
       for (int dia = 1; dia <= totalDias; dia++) {
@@ -465,8 +482,6 @@ class ExportHelper {
       }
 
       final cabecalhoDias = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-
-      // Construção das linhas de semanas para o mês
       List<pw.TableRow> linhasSemanas = [];
       int diaAtual = 1;
 
@@ -475,15 +490,9 @@ class ExportHelper {
 
         for (int col = 0; col < 7; col++) {
           if (linhasSemanas.isEmpty && col < offsetInicio) {
-            celulasSemana.add(pw.Container(
-              height: 18,
-              color: PdfColors.grey100,
-            ));
+            celulasSemana.add(pw.Container(height: 18, color: PdfColors.grey100));
           } else if (diaAtual > totalDias) {
-            celulasSemana.add(pw.Container(
-              height: 18,
-              color: PdfColors.grey100,
-            ));
+            celulasSemana.add(pw.Container(height: 18, color: PdfColors.grey100));
           } else {
             String dataStr = '$ano-${mes.toString().padLeft(2, '0')}-${diaAtual.toString().padLeft(2, '0')}';
             bool isFerias = datasFerias.contains(dataStr);
@@ -517,7 +526,6 @@ class ExportHelper {
             diaAtual++;
           }
         }
-
         linhasSemanas.add(pw.TableRow(children: celulasSemana));
       }
 
@@ -531,7 +539,6 @@ class ExportHelper {
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.stretch,
           children: [
-            // Barra de Título do Mês com Contagem de Férias do Mês
             pw.Container(
               padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               decoration: const pw.BoxDecoration(
@@ -563,7 +570,6 @@ class ExportHelper {
                 ],
               ),
             ),
-            // Tabela com Dias da Semana e Dias do Mês
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.4),
               children: [
@@ -588,7 +594,6 @@ class ExportHelper {
       );
     }
 
-    // Função de Construção da Página Semestral (6 meses por folha)
     pw.Page buildPaginaSemestre({
       required int mesInicio,
       required int mesFim,
@@ -602,7 +607,6 @@ class ExportHelper {
           return pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              // Cabeçalho Oficial
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -619,7 +623,6 @@ class ExportHelper {
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
                     ],
                   ),
-                  // Caixa Destaque com Total de Férias Anual
                   pw.Container(
                     padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: pw.BoxDecoration(
@@ -642,8 +645,6 @@ class ExportHelper {
               pw.SizedBox(height: 6),
               pw.Divider(thickness: 1, color: PdfColors.indigo900),
               pw.SizedBox(height: 6),
-
-              // Grelha de 6 Meses (2 linhas de 3 meses)
               pw.Expanded(
                 child: pw.Column(
                   mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
@@ -667,10 +668,8 @@ class ExportHelper {
                   ],
                 ),
               ),
-
               pw.SizedBox(height: 6),
               pw.Divider(thickness: 0.5),
-              // Rodapé com Legenda, Legislação e Autoria
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -693,7 +692,6 @@ class ExportHelper {
       );
     }
 
-    // Calcula férias do 1º e 2º semestre
     int ferias1Sem = 0;
     int ferias2Sem = 0;
     for (var r in registosAno) {
@@ -706,7 +704,6 @@ class ExportHelper {
       }
     }
 
-    // Página 1: 1.º Semestre (Janeiro a Junho)
     pdf.addPage(buildPaginaSemestre(
       mesInicio: 1,
       mesFim: 6,
@@ -714,7 +711,6 @@ class ExportHelper {
       totalFeriasSemestre: ferias1Sem,
     ));
 
-    // Página 2: 2.º Semestre (Julho a Dezembro)
     pdf.addPage(buildPaginaSemestre(
       mesInicio: 7,
       mesFim: 12,
@@ -728,7 +724,211 @@ class ExportHelper {
     return file;
   }
 
-  // --- MODAL DE GESTÃO DAS 3 OPÇÕES (VER, EXPORTAR, PARTILHAR) ---
+  // --- GERADOR DE PDF 4: RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS ---
+  static Future<File> gerarPDFResumoAnual({
+    required Map<String, dynamic> perfil,
+    required List<Map<String, dynamic>> registosAno,
+    required int ano,
+  }) async {
+    final pdf = pw.Document(
+      title: 'Resumo Anual de Banco de Horas e Rendimentos — $ano',
+      author: 'Rui Barata',
+      creator: 'Gestão de Horários - Rui Barata © 2026',
+      subject: 'Lei n.º 7/2009 (Código do Trabalho - Versão consolidada em vigor)',
+    );
+
+    pw.MemoryImage? imageLogo;
+    try {
+      final ByteData bytes = await rootBundle.load('assets/logo_rb.png');
+      imageLogo = pw.MemoryImage(bytes.buffer.asUint8List());
+    } catch (_) {}
+
+    double salarioBase = (perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
+    double valorSubsidioDiario = (perfil['valorSubsidioAlimentacao'] as num?)?.toDouble() ?? 6.0;
+    double valorHoraBase = salarioBase / 174.0;
+
+    final List<String> nomesMeses = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+
+    List<List<String>> linhasMesesTabela = [];
+    double totalAnualExtraHoras = 0.0;
+    double totalAnualExtraEuros = 0.0;
+    double totalAnualDescontoEuros = 0.0;
+    double totalAnualSubsidioEuros = 0.0;
+    double totalAnualGanha = 0.0;
+
+    for (int m = 1; m <= 12; m++) {
+      String mesStr = m.toString().padLeft(2, '0');
+      var registosMes = registosAno.where((r) => r['data'].toString().startsWith('$ano-$mesStr')).toList();
+
+      double horasExtraMes = 0.0;
+      double valorExtraMes = 0.0;
+      double valorDescontoMes = 0.0;
+      double valorSubsidioMes = 0.0;
+      double diasFeriasMes = 0.0;
+
+      for (var reg in registosMes) {
+        String tipo = reg['tipoDia']?.toString() ?? 'Trabalho';
+        int incluiSub = (reg['incluiSubsidio'] as num?)?.toInt() ?? 0;
+        
+        if (incluiSub == 1) {
+          valorSubsidioMes += valorSubsidioDiario;
+        }
+
+        if (tipo == 'Férias') {
+          diasFeriasMes += 1.0;
+        } else if (tipo == 'Trabalho' || tipo == 'Folga Trabalhada') {
+          double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          double diff = hEfetivas - hContratadas;
+
+          if (diff > 0.01) {
+            String acaoExcesso = reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
+            if (acaoExcesso == 'Pagar' || tipo == 'Folga Trabalhada') {
+              horasExtraMes += diff;
+              valorExtraMes += diff * valorHoraBase * 1.25;
+            }
+          } else if (diff < -0.01) {
+            String acaoFalta = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
+            if (acaoFalta == 'Descontar no Salário') {
+              valorDescontoMes += diff.abs() * valorHoraBase;
+            }
+          }
+
+          double extraPaga = (reg['horasExtraPagas'] as num?)?.toDouble() ?? 0.0;
+          if (extraPaga > 0 && diff <= 0) {
+            horasExtraMes += extraPaga;
+            valorExtraMes += extraPaga * valorHoraBase * 1.25;
+          }
+
+          double descSalario = (reg['horasDescontoSalario'] as num?)?.toDouble() ?? 0.0;
+          if (descSalario > 0) {
+            valorDescontoMes += descSalario * valorHoraBase;
+          }
+        } else if (tipo == 'Falta') {
+          String acaoFalta = reg['acaoFalta']?.toString() ?? '';
+          if (acaoFalta == 'Descontar no Salário') {
+            double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+            valorDescontoMes += (hContratadas > 0 ? hContratadas : 8.0) * valorHoraBase;
+          }
+        }
+      }
+
+      // Cálculo rigoroso idêntico ao ecrã principal (Salário Base + Horas Extra + Subsídio de Alimentação - Descontos/Faltas)
+      double totalMesIliquido = salarioBase + valorExtraMes - valorDescontoMes + valorSubsidioMes;
+      
+      totalAnualExtraHoras += horasExtraMes;
+      totalAnualExtraEuros += valorExtraMes;
+      totalAnualDescontoEuros += valorDescontoMes;
+      totalAnualSubsidioEuros += valorSubsidioMes;
+      totalAnualGanha += totalMesIliquido;
+
+      linhasMesesTabela.add([
+        nomesMeses[m - 1],
+        '${salarioBase.toStringAsFixed(2)} €',
+        '${horasExtraMes.toStringAsFixed(1)}h (+${valorExtraMes.toStringAsFixed(2)} €)',
+        '-${valorDescontoMes.toStringAsFixed(2)} €',
+        '${diasFeriasMes.toInt()} d',
+        '${totalMesIliquido.toStringAsFixed(2)} €',
+      ]);
+    }
+
+    final agora = DateTime.now();
+    final dataHoraGeracao = "${agora.day.toString().padLeft(2, '0')}/${agora.month.toString().padLeft(2, '0')}/${agora.year} às ${agora.hour.toString().padLeft(2, '0')}:${agora.minute.toString().padLeft(2, '0')}";
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(22),
+        build: (pw.Context context) {
+          return [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS — $ano',
+                        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.indigo900)),
+                    pw.Text('Trabalhador: ${perfil['nomeTrabalhador'] ?? ''} | Empresa: ${perfil['nomeEmpresa'] ?? ''}',
+                        style: const pw.TextStyle(fontSize: 10)),
+                    pw.Text('Desenvolvido por Rui Barata © 2026 (Software Protegido - Cópia e Edição Proibidas)',
+                        style: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+                  ],
+                ),
+                if (imageLogo != null) pw.ClipOval(child: pw.Image(imageLogo, width: 40, height: 40)),
+              ],
+            ),
+            pw.SizedBox(height: 6),
+            pw.Divider(thickness: 1),
+            pw.SizedBox(height: 6),
+
+            pw.Table.fromTextArray(
+              headers: ['Mês', 'Salário Base', 'Horas Extra / Valor', 'Descontos', 'Férias', 'Total Mensal Ilíquido'],
+              data: [
+                ...linhasMesesTabela,
+                [
+                  'TOTAL ANUAL',
+                  '${(salarioBase * 12).toStringAsFixed(2)} €',
+                  '${totalAnualExtraHoras.toStringAsFixed(1)}h (+${totalAnualExtraEuros.toStringAsFixed(2)} €)',
+                  '-${totalAnualDescontoEuros.toStringAsFixed(2)} €',
+                  '-',
+                  '${totalAnualGanha.toStringAsFixed(2)} €',
+                ]
+              ],
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8.5, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColors.indigo900),
+              cellStyle: const pw.TextStyle(fontSize: 8),
+              cellAlignment: pw.Alignment.center,
+            ),
+            pw.SizedBox(height: 12),
+
+            pw.Container(
+              padding: const pw.EdgeInsets.all(8),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: PdfColors.indigo900, width: 0.5),
+                color: PdfColors.grey50,
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('ENQUADRAMENTO LEGAL E CONFORMIDADE (CÓDIGO DO TRABALHO):',
+                      style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.indigo900)),
+                  pw.SizedBox(height: 3),
+                  pw.Text(
+                    '• Diploma Legal Base: Lei n.º 7/2009, de 12 de fevereiro (Código do Trabalho), com as atualizações e versões em vigor em 2026.\n'
+                    '• Artigos Aplicados: Art.º 203.º (Período normal de trabalho), Art.º 208.º (Banco de horas), Art.º 229.º (Descanso compensatório) e Art.º 268.º/271.º (Cálculo de retribuição de trabalho suplementar e valor hora).\n'
+                    '• Validade e Autenticidade: Documento digital gerado automaticamente pelo sistema de gestão de tempos de Rui Barata © 2026. Proibida qualquer adulteração de dados.',
+                    style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey800),
+                  ),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 8),
+
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Data e hora de emissão: $dataHoraGeracao',
+                    style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600)),
+                pw.Text('Rui Barata © 2026 — Todos os direitos reservados',
+                    style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900)),
+              ],
+            ),
+          ];
+        },
+      ),
+    );
+
+    final dir = await getTemporaryDirectory();
+    final file = File(p.join(dir.path, 'resumo_anual_rendimentos_${ano}.pdf'));
+    await file.writeAsBytes(await pdf.save());
+    return file;
+  }
+
   static void mostrarOpcoesExportacao({
     required BuildContext context,
     required String tipo,

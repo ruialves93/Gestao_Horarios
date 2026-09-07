@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import '../services/database_helper.dart';
 
 class SettingsModal {
@@ -7,152 +8,166 @@ class SettingsModal {
     required Map<String, dynamic> perfil,
     required VoidCallback onAtualizado,
   }) {
-    final nomeTrabController = TextEditingController(text: perfil['nomeTrabalhador']?.toString() ?? '');
-    final nomeEmpController = TextEditingController(text: perfil['nomeEmpresa']?.toString() ?? '');
-    final salarioController = TextEditingController(
-      text: perfil['salarioBase'] != null ? perfil['salarioBase'].toString() : '1000.0',
-    );
+    final nomeTrabalhadorController = TextEditingController(text: perfil['nomeTrabalhador']?.toString() ?? '');
+    final nomeEmpresaController = TextEditingController(text: perfil['nomeEmpresa']?.toString() ?? '');
+    final salarioBaseController = TextEditingController(text: perfil['salarioBase']?.toString() ?? '1000.0');
+    final subsidioAlimentacaoController = TextEditingController(text: perfil['valorSubsidioAlimentacao']?.toString() ?? '6.0');
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Definições do Trabalhador e Empresa'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nomeTrabController,
-                decoration: const InputDecoration(
-                  labelText: 'Nome do Trabalhador',
-                  border: OutlineInputBorder(),
+      builder: (context) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Configurar Perfil e Empresa', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nomeTrabalhadorController,
+                  decoration: const InputDecoration(labelText: 'Nome do Trabalhador', prefixIcon: Icon(Icons.person)),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: nomeEmpController,
-                decoration: const InputDecoration(
-                  labelText: 'Nome da Empresa',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nomeEmpresaController,
+                  decoration: const InputDecoration(labelText: 'Nome da Empresa', prefixIcon: Icon(Icons.business)),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: salarioController,
-                decoration: const InputDecoration(
-                  labelText: 'Salário Base (€)',
-                  border: OutlineInputBorder(),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: salarioBaseController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Salário Base (€)', prefixIcon: Icon(Icons.euro)),
                 ),
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextField(
+                  controller: subsidioAlimentacaoController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Subsídio de Alimentação por Dia (€)', prefixIcon: Icon(Icons.restaurant)),
+                ),
+              ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final updated = {
-                'nomeTrabalhador': nomeTrabController.text.trim(),
-                'nomeEmpresa': nomeEmpController.text.trim(),
-                'salarioBase': double.tryParse(salarioController.text) ?? 1000.0,
-                'horarioNormalDiario': perfil['horarioNormalDiario'] ?? 8.0,
-                'pinSeguranca': perfil['pinSeguranca'] ?? '',
-                'biometriaAtiva': perfil['biometriaAtiva'] ?? 0,
-              };
-              await DatabaseHelper.instance.updatePerfil(updated);
-              if (context.mounted) Navigator.pop(ctx);
-              onAtualizado();
-            },
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A237E), foregroundColor: Colors.white),
+              onPressed: () async {
+                double salario = double.tryParse(salarioBaseController.text.replaceAll(',', '.')) ?? 1000.0;
+                double subsidio = double.tryParse(subsidioAlimentacaoController.text.replaceAll(',', '.')) ?? 0.0;
+
+                await DatabaseHelper.instance.atualizarPerfil({
+                  'nomeTrabalhador': nomeTrabalhadorController.text,
+                  'nomeEmpresa': nomeEmpresaController.text,
+                  'salarioBase': salario,
+                  'valorSubsidioAlimentacao': subsidio,
+                  'pinApp': perfil['pinApp'] ?? '',
+                  'biometriaAtiva': perfil['biometriaAtiva'] ?? 0,
+                });
+
+                onAtualizado();
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
+      },
     );
   }
 
   static void abrirModalSeguranca({
     required BuildContext context,
     required Map<String, dynamic> perfil,
-    required Function(String mensagem) onFeedback,
+    required Function(String) onFeedback,
     required VoidCallback onAtualizado,
   }) {
-    final pinController = TextEditingController(text: perfil['pinSeguranca']?.toString() ?? '');
-    bool biometriaVal = (perfil['biometriaAtiva'] ?? 0) == 1;
+    final pinController = TextEditingController(text: perfil['pinApp']?.toString() ?? '');
+    bool biometria = (perfil['biometriaAtiva'] == 1);
 
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: const Text('Definições de Segurança'),
-            content: SingleChildScrollView(
-              child: Column(
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateModal) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: const Text('Segurança', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+              content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Defina um PIN de 4 a 6 dígitos para proteger o acesso à aplicação:', style: TextStyle(fontSize: 12)),
-                  const SizedBox(height: 10),
                   TextField(
                     controller: pinController,
                     keyboardType: TextInputType.number,
                     obscureText: true,
-                    maxLength: 6,
-                    decoration: const InputDecoration(
-                      labelText: 'PIN de Acesso (Deixar vazio para desativar)',
-                      border: OutlineInputBorder(),
-                    ),
+                    decoration: const InputDecoration(labelText: 'PIN de Acesso (Opcional)', prefixIcon: Icon(Icons.lock)),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 12),
                   SwitchListTile(
-                    title: const Text('Ativar Impressão Digital / Facial', style: TextStyle(fontSize: 13)),
-                    value: biometriaVal,
+                    title: const Text('Ativar Biometria'),
+                    value: biometria,
                     onChanged: (val) {
-                      setDialogState(() => biometriaVal = val);
+                      setStateModal(() {
+                        biometria = val;
+                      });
                     },
                   ),
                 ],
               ),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-              ElevatedButton(
-                onPressed: () async {
-                  final updated = {
-                    'nomeTrabalhador': perfil['nomeTrabalhador'] ?? '',
-                    'nomeEmpresa': perfil['nomeEmpresa'] ?? '',
-                    'salarioBase': perfil['salarioBase'] ?? 1000.0,
-                    'horarioNormalDiario': perfil['horarioNormalDiario'] ?? 8.0,
-                    'pinSeguranca': pinController.text.trim(),
-                    'biometriaAtiva': biometriaVal ? 1 : 0,
-                  };
-                  await DatabaseHelper.instance.updatePerfil(updated);
-                  if (context.mounted) Navigator.pop(ctx);
-                  onAtualizado();
-                  onFeedback('Definições de segurança guardadas com sucesso!');
-                },
-                child: const Text('Guardar'),
-              ),
-            ],
-          );
-        },
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A237E), foregroundColor: Colors.white),
+                  onPressed: () async {
+                    await DatabaseHelper.instance.atualizarPerfil({
+                      'nomeTrabalhador': perfil['nomeTrabalhador'],
+                      'nomeEmpresa': perfil['nomeEmpresa'],
+                      'salarioBase': perfil['salarioBase'],
+                      'valorSubsidioAlimentacao': perfil['valorSubsidioAlimentacao'] ?? 6.0,
+                      'pinApp': pinController.text.trim(),
+                      'biometriaAtiva': biometria ? 1 : 0,
+                    });
+                    onAtualizado();
+                    onFeedback('Definições de segurança atualizadas.');
+                    if (context.mounted) Navigator.pop(context);
+                  },
+                  child: const Text('Guardar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
   static Future<void> executarRestauro({
     required BuildContext context,
     required VoidCallback onAtualizado,
-    required Function(String mensagem) onFeedback,
+    required Function(String) onFeedback,
   }) async {
-    bool ok = await DatabaseHelper.instance.restaurarBaseDeDadosPorFilePicker();
-    if (ok) {
-      onAtualizado();
-      onFeedback('Base de dados restaurada com sucesso!');
-    } else {
-      onFeedback('Nenhum ficheiro selecionado ou erro ao restaurar.');
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        dialogTitle: 'Selecionar Ficheiro de Backup (.db)',
+      );
+
+      if (result != null && result.files.single.path != null) {
+        bool sucesso = await DatabaseHelper.instance.restaurarBaseDeDadosDeFicheiro(result.files.single.path!);
+        if (sucesso) {
+          onAtualizado();
+          onFeedback('Base de dados restaurada com sucesso!');
+        } else {
+          onFeedback('Erro ao restaurar o ficheiro selecionado.');
+        }
+      }
+    } catch (e) {
+      onFeedback('Erro no restauro: $e');
     }
   }
 }
