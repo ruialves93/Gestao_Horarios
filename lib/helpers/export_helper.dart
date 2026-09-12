@@ -79,9 +79,10 @@ class ExportHelper {
             horasDescontarTexto = '-${diff.abs().toStringAsFixed(2)}h';
             totalHorasDescontarMes += diff.abs();
           }
-        } else if (tipo == 'Falta') {
-          horasDescontarTexto = 'Falta';
-          totalHorasDescontarMes += 8.0;
+        } else if (tipo == 'Falta' || tipo == 'Baixa') {
+          horasDescontarTexto = tipo;
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          totalHorasDescontarMes += (hContratadas > 0 ? hContratadas : 8.0);
         } else {
           entrada = tipo; 
         }
@@ -190,7 +191,7 @@ class ExportHelper {
     return file;
   }
 
-  // --- GERADOR DE PDF 2: EXTRATO SALARIAL DETALHADO ---
+  // --- GERADOR DE PDF 2: EXTRATO SALARIAL DETALHADO (DESCONTOS DE FALTAS/BAIXAS/DÉFICES) ---
   static Future<File> gerarPDFValoresReceberDetalhado({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosMes,
@@ -261,12 +262,46 @@ class ExportHelper {
           somaValorHorasExtra += valorExtra;
         }
 
+        if (tipoDia == 'Folga Trabalhada') {
+          String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? '';
+          if (acaoFolga == 'Pagar') {
+            double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+            valorExtra = hEfetivas * valorHoraBase * 1.25;
+            extraPagaStr = '${hEfetivas.toStringAsFixed(2)}h';
+            valorExtraStr = '+${valorExtra.toStringAsFixed(2)} EUR';
+            somaHorasExtra += hEfetivas;
+            somaValorHorasExtra += valorExtra;
+          }
+        }
+
         if (descSalario > 0) {
           valorDesc = descSalario * valorHoraBase;
           descSalarioStr = '${descSalario.toStringAsFixed(2)}h';
           valorDescStr = '-${valorDesc.toStringAsFixed(2)} EUR';
           somaHorasDesconto += descSalario;
           somaValorDescontos += valorDesc;
+        } else if (tipoDia == 'Falta' || tipoDia == 'Baixa') {
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          double horasFalta = hContratadas > 0 ? hContratadas : 8.0;
+          valorDesc = horasFalta * valorHoraBase;
+          descSalarioStr = '$tipoDia (${horasFalta.toStringAsFixed(1)}h)';
+          valorDescStr = '-${valorDesc.toStringAsFixed(2)} EUR';
+          somaHorasDesconto += horasFalta;
+          somaValorDescontos += valorDesc;
+        } else {
+          double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          double diff = hEfetivas - hContratadas;
+          if (diff < -0.01) {
+            String acaoFalta = reg['acaoFalta']?.toString() ?? '';
+            if (acaoFalta == 'Descontar no Salário') {
+              valorDesc = diff.abs() * valorHoraBase;
+              descSalarioStr = '${diff.abs().toStringAsFixed(2)}h';
+              valorDescStr = '-${valorDesc.toStringAsFixed(2)} EUR';
+              somaHorasDesconto += diff.abs();
+              somaValorDescontos += valorDesc;
+            }
+          }
         }
 
         double saldoFinDia = valorExtra - valorDesc;
@@ -274,7 +309,7 @@ class ExportHelper {
           subtotalDiaStr = '+${saldoFinDia.toStringAsFixed(2)} EUR';
         } else if (saldoFinDia < 0) {
           subtotalDiaStr = '${saldoFinDia.toStringAsFixed(2)} EUR';
-        } else if (extraPaga > 0 || descSalario > 0) {
+        } else if (valorExtra > 0 || valorDesc > 0) {
           subtotalDiaStr = '0.00 EUR';
         }
       }
@@ -350,7 +385,7 @@ class ExportHelper {
                           'Extra Paga (${somaHorasExtra.toStringAsFixed(2)}h): +${somaValorHorasExtra.toStringAsFixed(2)} EUR',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.green900)),
                       pw.Text(
-                          'Descontos (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} EUR',
+                          'Descontos/Faltas (${somaHorasDesconto.toStringAsFixed(2)}h): -${somaValorDescontos.toStringAsFixed(2)} EUR',
                           style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.red900)),
                     ],
                   ),
@@ -405,7 +440,7 @@ class ExportHelper {
                   pw.Text(
                     '1. Valor/Hora: art.º 271.º (fórmula legal [(Salário x 12) / (52 x n.º horas normais semanais)]).\n'
                     '2. Trabalho Suplementar: art.º 268.º, n.º 1 (majoração de 25% na primeira hora ou fração em dia de trabalho útil).\n'
-                    '3. Banco de Horas: art.º 208.º e liquidação salarial subsidiária de créditos e débitos.\n'
+                    '3. Faltas, Baixas e Descontos: Artigos aplicáveis de perda de retribuição por ausência injustificada/justificada não remunerada.\n'
                     '4. Documento digital oficial não editável gerado pelo software de gestão de horários.',
                     style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey800),
                   ),
@@ -727,7 +762,7 @@ class ExportHelper {
     return file;
   }
 
-  // --- GERADOR DE PDF 4: RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS (UTILIZA EUR) ---
+  // --- GERADOR DE PDF 4: RESUMO ANUAL DE BANCO DE HORAS E RENDIMENTOS (DESCONTANDO FALTAS/BAIXAS E UTILIZANDO EUR) ---
   static Future<File> gerarPDFResumoAnual({
     required Map<String, dynamic> perfil,
     required List<Map<String, dynamic>> registosAno,
@@ -810,12 +845,9 @@ class ExportHelper {
           if (descSalario > 0) {
             valorDescontoMes += descSalario * valorHoraBase;
           }
-        } else if (tipo == 'Falta') {
-          String acaoFalta = reg['acaoFalta']?.toString() ?? '';
-          if (acaoFalta == 'Descontar no Salário') {
-            double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
-            valorDescontoMes += (hContratadas > 0 ? hContratadas : 8.0) * valorHoraBase;
-          }
+        } else if (tipo == 'Falta' || tipo == 'Baixa') {
+          double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+          valorDescontoMes += (hContratadas > 0 ? hContratadas : 8.0) * valorHoraBase;
         }
       }
 

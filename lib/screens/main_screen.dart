@@ -308,29 +308,78 @@ class _MainScreenState extends State<MainScreen> {
     String nomeTrabalhador = _perfil['nomeTrabalhador']?.isNotEmpty == true ? _perfil['nomeTrabalhador'] : 'Rui Barata';
     String nomeEmpresa = _perfil['nomeEmpresa']?.isNotEmpty == true ? _perfil['nomeEmpresa'] : 'Gestão de Horários';
 
-    // Cálculo unificado de horas extra (horas e valor monetário em €)
     double salarioBase = (_perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
+    double valorSubsidioDiario = (_perfil['valorSubsidioAlimentacao'] as num?)?.toDouble() ?? 6.0;
     double valorHoraBase = salarioBase / 174.0;
 
-    double totalHorasExtraPagasMes = 0.0;
-    double totalValorExtraMesEuros = 0.0;
+    // Quantidades (horas e dias)
+    double bancoHorasMesGanhas = 0.0;
+    double bancoHorasMesDescontadas = 0.0;
+    int diasFeriasMes = 0;
+    int diasFolgasMes = 0;
+    int diasFaltasMes = 0;
+    int diasBaixasMes = 0;
+
+    // Valores em €
+    double totalValorExtraEuros = 0.0;
+    double totalValorDescontosEuros = 0.0;
+    double totalSubsidioEuros = 0.0;
 
     _registosMes.forEach((key, reg) {
-      double extraPaga = (reg['horasExtraPagas'] as num?)?.toDouble() ?? 0.0;
-      if (extraPaga > 0) {
-        totalHorasExtraPagasMes += extraPaga;
-        totalValorExtraMesEuros += extraPaga * valorHoraBase * 1.25;
+      int incluiSub = (reg['incluiSubsidio'] as num?)?.toInt() ?? 0;
+      if (incluiSub == 1) {
+        totalSubsidioEuros += valorSubsidioDiario;
       }
-      String tipo = reg['tipoDia']?.toString() ?? '';
-      if (tipo == 'Folga Trabalhada') {
-        String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? '';
-        if (acaoFolga == 'Pagar') {
-          double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
-          totalHorasExtraPagasMes += hEfetivas;
-          totalValorExtraMesEuros += hEfetivas * valorHoraBase * 1.25;
+
+      String tipo = reg['tipoDia']?.toString() ?? 'Trabalho';
+      double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+      double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+
+      if (tipo == 'Férias') {
+        diasFeriasMes++;
+      } else if (tipo == 'Folga') {
+        diasFolgasMes++;
+      } else if (tipo == 'Falta') {
+        diasFaltasMes++;
+        String acaoFaltaTratamento = reg['acaoFaltaTratamento']?.toString() ?? 'Descontar no Salário';
+        if (acaoFaltaTratamento == 'Descontar no Banco de Horas') {
+          bancoHorasMesDescontadas += hContratadas;
+        } else {
+          totalValorDescontosEuros += hContratadas * valorHoraBase;
+        }
+      } else if (tipo == 'Baixa') {
+        diasBaixasMes++;
+        totalValorDescontosEuros += hContratadas * valorHoraBase;
+      } else if (tipo == 'Trabalho') {
+        double diff = hEfetivas - hContratadas;
+        if (diff > 0.01) {
+          String acaoExcesso = reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
+          if (acaoExcesso == 'Banco de Horas') {
+            bancoHorasMesGanhas += diff;
+          } else if (acaoExcesso == 'Pagar') {
+            totalValorExtraEuros += diff * valorHoraBase * 1.25;
+          }
+          // Se for 'Voluntariado', não soma nada ao banco nem ao pagamento
+        } else if (diff < -0.01) {
+          String acaoDefice = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
+          if (acaoDefice == 'Descontar no Banco') {
+            bancoHorasMesDescontadas += diff.abs();
+          } else if (acaoDefice == 'Descontar no Salário') {
+            totalValorDescontosEuros += diff.abs() * valorHoraBase;
+          }
+        }
+      } else if (tipo == 'Folga Trabalhada') {
+        String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? 'Banco de Horas';
+        if (acaoFolga == 'Banco de Horas') {
+          bancoHorasMesGanhas += hEfetivas;
+        } else if (acaoFolga == 'Salário') {
+          totalValorExtraEuros += hEfetivas * valorHoraBase * 1.25;
         }
       }
     });
+
+    double saldoBancoHorasLiquido = bancoHorasMesGanhas - bancoHorasMesDescontadas;
+    double totalIliquidoAReceber = salarioBase + totalValorExtraEuros - totalValorDescontosEuros + totalSubsidioEuros;
 
     return Scaffold(
       appBar: AppBar(
@@ -354,7 +403,6 @@ class _MainScreenState extends State<MainScreen> {
           ),
         ),
       ),
-      
       drawer: Drawer(
         child: Column(
           children: [
@@ -367,10 +415,7 @@ class _MainScreenState extends State<MainScreen> {
                   errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, size: 40, color: Colors.white),
                 ),
               ),
-              accountName: Text(
-                nomeTrabalhador,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
+              accountName: Text(nomeTrabalhador, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
               accountEmail: Text(nomeEmpresa),
             ),
             ListTile(
@@ -378,11 +423,7 @@ class _MainScreenState extends State<MainScreen> {
               title: const Text('Configurar Perfil'),
               onTap: () {
                 Navigator.pop(context);
-                SettingsModal.abrirModalPerfil(
-                  context: context,
-                  perfil: _perfil,
-                  onAtualizado: _carregarDados,
-                );
+                SettingsModal.abrirModalPerfil(context: context, perfil: _perfil, onAtualizado: _carregarDados);
               },
             ),
             ListTile(
@@ -477,7 +518,6 @@ class _MainScreenState extends State<MainScreen> {
           ],
         ),
       ),
-
       body: _carregando
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -488,24 +528,14 @@ class _MainScreenState extends State<MainScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.chevron_left, color: Color(0xFF1A237E)),
-                        onPressed: () => _mudarMes(-1),
-                      ),
-                      Text(
-                        '${mesesNomes[_mesAtual - 1]} $_anoAtual',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A237E)),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.chevron_right, color: Color(0xFF1A237E)),
-                        onPressed: () => _mudarMes(1),
-                      ),
+                      IconButton(icon: const Icon(Icons.chevron_left, color: Color(0xFF1A237E)), onPressed: () => _mudarMes(-1)),
+                      Text('${mesesNomes[_mesAtual - 1]} $_anoAtual', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+                      IconButton(icon: const Icon(Icons.chevron_right, color: Color(0xFF1A237E)), onPressed: () => _mudarMes(1)),
                     ],
                   ),
                 ),
-                
                 Padding(
-                  padding: const EdgeInsets.all(10.0),
+                  padding: const EdgeInsets.all(8.0),
                   child: Card(
                     elevation: 3,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -513,27 +543,46 @@ class _MainScreenState extends State<MainScreen> {
                       padding: const EdgeInsets.all(10.0),
                       child: Column(
                         children: [
+                          // LINHA DE QUANTIDADES 1: Banco de Horas, Horas Extra Ganhas, Horas Descontadas
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              _buildResumoItem('Banco Horas', '${(_totaisGerais['credito'] ?? 0.0).toStringAsFixed(1)}h', Colors.indigo.shade900),
-                              _buildResumoItem('Férias', '${(_totaisGerais['ferias'] ?? 0.0).toInt()}d', Colors.blue),
-                              _buildResumoItem('Folgas', '${(_totaisGerais['folgas'] ?? 0.0).toInt()}d', Colors.purple),
+                              _buildResumoItem(
+                                'Saldo Banco',
+                                '${saldoBancoHorasLiquido >= 0 ? '+' : ''}${saldoBancoHorasLiquido.toStringAsFixed(1)}h',
+                                saldoBancoHorasLiquido >= 0 ? Colors.indigo.shade900 : Colors.orange.shade900,
+                              ),
+                              _buildResumoItem('H. Extras Banco', '+${bancoHorasMesGanhas.toStringAsFixed(1)}h', Colors.green.shade800),
+                              _buildResumoItem('H. Desconto Banco', '-${bancoHorasMesDescontadas.toStringAsFixed(1)}h', Colors.red.shade800),
                             ],
                           ),
-                          const Divider(height: 16),
+                          const Divider(height: 12),
+                          // LINHA DE QUANTIDADES 2: Dias de Férias, Folgas, Faltas, Baixas
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              _buildResumoItem('Salário Base', '${(_totaisGerais['salarioBase'] ?? 0.0).toStringAsFixed(2)}€', Colors.black87),
-                              _buildResumoItem('Horas Extra', '${totalHorasExtraPagasMes.toStringAsFixed(1)}h (${totalValorExtraMesEuros.toStringAsFixed(2)}€)', Colors.green.shade800),
-                              _buildResumoItem('Subs. Alim.', '${(_totaisGerais['subsidioAlimentacao'] ?? 0.0).toStringAsFixed(2)}€', Colors.brown),
+                              _buildResumoItem('Férias', '${diasFeriasMes}d', const Color(0xFF0288D1)),
+                              _buildResumoItem('Folgas', '${diasFolgasMes}d', const Color(0xFF7B1FA2)),
+                              _buildResumoItem('Faltas', '${diasFaltasMes}d', const Color(0xFFE65100)),
+                              _buildResumoItem('Baixas', '${diasBaixasMes}d', const Color(0xFFC62828)),
                             ],
                           ),
-                          const SizedBox(height: 8),
+                          const Divider(height: 12),
+                          // LINHA DE VALORES EM €
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceAround,
+                            children: [
+                              _buildResumoItem('Salário Base', '${salarioBase.toStringAsFixed(2)} €', Colors.black87),
+                              _buildResumoItem('Valor H. Extra', '+${totalValorExtraEuros.toStringAsFixed(2)} €', Colors.green.shade900),
+                              _buildResumoItem('Descontos Sal.', '-${totalValorDescontosEuros.toStringAsFixed(2)} €', Colors.red.shade900),
+                              _buildResumoItem('Subs. Alim.', '${totalSubsidioEuros.toStringAsFixed(2)} €', Colors.brown),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          // TOTAL ILÍQUIDO A RECEBER
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.all(8),
+                            padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               color: const Color(0xFF1A237E),
                               borderRadius: BorderRadius.circular(8),
@@ -541,10 +590,10 @@ class _MainScreenState extends State<MainScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('TOTAL ESTIMADO A RECEBER:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                const Text('TOTAL ILÍQUIDO A RECEBER:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
                                 Text(
-                                  '${(_totaisGerais['totalAReceber'] ?? 0.0).toStringAsFixed(2)} €',
-                                  style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 15),
+                                  '${totalIliquidoAReceber.toStringAsFixed(2)} €',
+                                  style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 16),
                                 ),
                               ],
                             ),
@@ -554,7 +603,6 @@ class _MainScreenState extends State<MainScreen> {
                     ),
                   ),
                 ),
-
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -570,9 +618,9 @@ class _MainScreenState extends State<MainScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(titulo, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
+        Text(titulo, style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 2),
-        Text(valor, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: cor)),
+        Text(valor, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: cor)),
       ],
     );
   }
@@ -598,7 +646,7 @@ class _MainScreenState extends State<MainScreen> {
       String chaveData = "$_anoAtual-${_mesAtual.toString().padLeft(2, '0')}-${dia.toString().padLeft(2, '0')}";
       final reg = _registosMes[chaveData];
 
-      String tipoDia = reg?['tipoDia'] ?? 'Trabalho';
+      String tipoDia = reg?['tipoDia'] ?? '';
       double hEfetivas = (reg?['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
       double hContratadas = (reg?['horasContratadas'] as num?)?.toDouble() ?? 8.0;
       double diff = hEfetivas - hContratadas;
@@ -608,34 +656,36 @@ class _MainScreenState extends State<MainScreen> {
       IconData? iconeSituacao;
       Color corIcone = Colors.black;
 
-      if (tipoDia == 'Férias') {
-        corFundo = Colors.blue.shade50;
-        corBorda = Colors.blue.shade300;
+      if (tipoDia == 'Trabalho') {
+        corFundo = const Color(0xFFE8F5E9);
+        corBorda = const Color(0xFF81C784);
+        iconeSituacao = Icons.work;
+        corIcone = const Color(0xFF2E7D32);
+      } else if (tipoDia == 'Férias') {
+        corFundo = const Color(0xFFE1F5FE);
+        corBorda = const Color(0xFF4FC3F7);
         iconeSituacao = Icons.beach_access;
-        corIcone = Colors.blue.shade800;
+        corIcone = const Color(0xFF0288D1);
       } else if (tipoDia == 'Folga') {
-        corFundo = Colors.purple.shade50;
-        corBorda = Colors.purple.shade300;
+        corFundo = const Color(0xFFF3E5F5);
+        corBorda = const Color(0xFFBA68C8);
         iconeSituacao = Icons.weekend;
-        corIcone = Colors.purple.shade800;
+        corIcone = const Color(0xFF7B1FA2);
       } else if (tipoDia == 'Folga Trabalhada') {
-        corFundo = Colors.teal.shade50;
-        corBorda = Colors.teal.shade300;
+        corFundo = const Color(0xFFE0F2F1);
+        corBorda = const Color(0xFF4DB6AC);
         iconeSituacao = Icons.work_history;
-        corIcone = Colors.teal.shade800;
+        corIcone = const Color(0xFF00796B);
       } else if (tipoDia == 'Falta') {
-        corFundo = Colors.orange.shade50;
-        corBorda = Colors.orange.shade300;
-        iconeSituacao = Icons.warning_amber;
-        corIcone = Colors.orange.shade800;
+        corFundo = const Color(0xFFFFF3E0);
+        corBorda = const Color(0xFFFFB74D);
+        iconeSituacao = Icons.warning_amber_rounded;
+        corIcone = const Color(0xFFE65100);
       } else if (tipoDia == 'Baixa') {
-        corFundo = Colors.red.shade50;
-        corBorda = Colors.red.shade300;
+        corFundo = const Color(0xFFFFEBEE);
+        corBorda = const Color(0xFFE57373);
         iconeSituacao = Icons.local_hospital;
-        corIcone = Colors.red.shade800;
-      } else if (reg != null) {
-        corFundo = Colors.green.shade50;
-        corBorda = Colors.green.shade300;
+        corIcone = const Color(0xFFC62828);
       }
 
       celulas.add(
@@ -664,18 +714,17 @@ class _MainScreenState extends State<MainScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('$dia', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    if (iconeSituacao != null)
-                      Icon(iconeSituacao, size: 14, color: corIcone),
+                    if (iconeSituacao != null) Icon(iconeSituacao, size: 14, color: corIcone),
                   ],
                 ),
-                if ((tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') && reg != null && diff.abs() > 0.01)
+                if ((tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') && diff.abs() > 0.01)
                   Center(
                     child: Text(
                       diff > 0 ? '+${diff.toStringAsFixed(1)}h' : '${diff.toStringAsFixed(1)}h',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: diff > 0 ? Colors.green.shade800 : Colors.orange.shade900,
+                        color: diff > 0 ? Colors.green.shade900 : Colors.red.shade900,
                       ),
                     ),
                   ),

@@ -1,7 +1,7 @@
 import 'dart:io';
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -11,7 +11,7 @@ class DatabaseHelper {
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('gestao_horarios_v3.db');
+    _database = await _initDB('gestao_horarios.db');
     return _database!;
   }
 
@@ -21,13 +21,14 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
-      onCreate: _createDB,
-      onUpgrade: _upgradeDB,
+      version: 2,
+      onCreate: _criarBD,
+      onOpen: _verificarEAtualizarColunas,
     );
   }
 
-  Future _createDB(Database db, int version) async {
+  Future _criarBD(Database db, int version) async {
+    // Tabela de Perfil
     await db.execute('''
       CREATE TABLE perfil (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,213 +36,168 @@ class DatabaseHelper {
         nomeEmpresa TEXT,
         salarioBase REAL,
         valorSubsidioAlimentacao REAL,
-        pinApp TEXT,
-        biometriaAtiva INTEGER
+        pinSeguranca TEXT
       )
     ''');
 
+    // Tabela de Registos Diários
     await db.execute('''
       CREATE TABLE registos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         data TEXT UNIQUE,
         tipoDia TEXT,
-        horasContratadas REAL,
         horaInicio TEXT,
         horaFim TEXT,
         almocoInicio TEXT,
         almocoFim TEXT,
         horasEfetivas REAL,
-        horasExtraPagas REAL,
-        horasDescontoSalario REAL,
+        horasContratadas REAL,
+        incluiSubsidio INTEGER,
         acaoExcesso TEXT,
         acaoFalta TEXT,
-        tipoJustificacao TEXT,
-        incluiSubsidio INTEGER
+        acaoFolgaTrabalhada TEXT,
+        subTipoFalta TEXT,
+        acaoFaltaTratamento TEXT,
+        horasExtraPagas REAL,
+        horasDescontoSalario REAL
       )
     ''');
+
+    await db.insert('perfil', {
+      'nomeTrabalhador': 'Rui Barata',
+      'nomeEmpresa': 'Gestão de Horários',
+      'salarioBase': 1000.0,
+      'valorSubsidioAlimentacao': 6.0,
+      'pinSeguranca': '',
+    });
   }
 
-  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 3) {
-      try {
-        await db.execute("ALTER TABLE perfil ADD COLUMN valorSubsidioAlimentacao REAL DEFAULT 0.0");
-        await db.execute("ALTER TABLE registos ADD COLUMN horasContratadas REAL DEFAULT 8.0");
-        await db.execute("ALTER TABLE registos ADD COLUMN horaInicio TEXT DEFAULT '08:00'");
-        await db.execute("ALTER TABLE registos ADD COLUMN horaFim TEXT DEFAULT '17:00'");
-        await db.execute("ALTER TABLE registos ADD COLUMN almocoInicio TEXT DEFAULT '12:00'");
-        await db.execute("ALTER TABLE registos ADD COLUMN almocoFim TEXT DEFAULT '13:00'");
-        await db.execute("ALTER TABLE registos ADD COLUMN acaoExcesso TEXT DEFAULT 'Banco de Horas'");
-        await db.execute("ALTER TABLE registos ADD COLUMN acaoFalta TEXT DEFAULT 'Descontar no Banco'");
-        await db.execute("ALTER TABLE registos ADD COLUMN tipoJustificacao TEXT DEFAULT 'Justificado'");
-        await db.execute("ALTER TABLE registos ADD COLUMN incluiSubsidio INTEGER DEFAULT 1");
-      } catch (_) {}
-    }
+  // Adiciona colunas em falta automaticamente sem apagar registos existentes
+  Future<void> _verificarEAtualizarColunas(Database db) async {
+    try {
+      final colunas = await db.rawQuery('PRAGMA table_info(registos)');
+      final nomesColunas = colunas.map((c) => c['name'] as String).toSet();
+
+      final colunasNecessarias = {
+        'subTipoFalta': 'TEXT',
+        'acaoFaltaTratamento': 'TEXT',
+        'horasExtraPagas': 'REAL',
+        'horasDescontoSalario': 'REAL',
+      };
+
+      for (var entry in colunasNecessarias.entries) {
+        if (!nomesColunas.contains(entry.key)) {
+          await db.execute('ALTER TABLE registos ADD COLUMN ${entry.key} ${entry.value}');
+        }
+      }
+    } catch (_) {}
   }
 
-  // --- PERFIL ---
+  // --- MÉTODOS DE PERFIL ---
   Future<Map<String, dynamic>> getPerfil() async {
     final db = await instance.database;
     final result = await db.query('perfil');
     if (result.isNotEmpty) {
       return result.first;
+    }
+    return {};
+  }
+
+  Future<int> salvarPerfil(Map<String, dynamic> perfil) async {
+    final db = await instance.database;
+    final count = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM perfil'));
+    if (count == null || count == 0) {
+      return await db.insert('perfil', perfil);
     } else {
-      await db.insert('perfil', {
-        'nomeTrabalhador': '',
-        'nomeEmpresa': '',
-        'salarioBase': 1000.0,
-        'valorSubsidioAlimentacao': 6.0,
-        'pinApp': '',
-        'biometriaAtiva': 0,
-      });
-      final res = await db.query('perfil');
-      return res.first;
+      return await db.update('perfil', perfil, where: 'id = ?', whereArgs: [1]);
     }
   }
 
   Future<int> atualizarPerfil(Map<String, dynamic> perfil) async {
-    final db = await instance.database;
-    return await db.update('perfil', perfil, where: 'id = ?', whereArgs: [1]);
+    return await salvarPerfil(perfil);
   }
 
-  // --- REGISTOS DIÁRIOS ---
+  // --- MÉTODOS DE REGISTOS DIÁRIOS ---
+  Future<Map<String, dynamic>?> getRegisto(String data) async {
+    final db = await instance.database;
+    final results = await db.query('registos', where: 'data = ?', whereArgs: [data]);
+    if (results.isNotEmpty) {
+      return results.first;
+    }
+    return null;
+  }
+
+  Future<int> salvarRegisto(Map<String, dynamic> registo) async {
+    final db = await instance.database;
+    return await db.insert(
+      'registos',
+      registo,
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<int> deletarRegisto(String data) async {
+    final db = await instance.database;
+    return await db.delete('registos', where: 'data = ?', whereArgs: [data]);
+  }
+
+  // --- CONSULTAS DO CALENDÁRIO E ESTATÍSTICAS ---
   Future<Map<String, Map<String, dynamic>>> getRegistosMes(int ano, int mes) async {
     final db = await instance.database;
     String mesStr = mes.toString().padLeft(2, '0');
-    final result = await db.query(
+    String prefixo = '$ano-$mesStr';
+
+    final results = await db.query(
       'registos',
-      where: "data LIKE ?",
-      whereArgs: ["$ano-$mesStr-%"],
+      where: 'data LIKE ?',
+      whereArgs: ['$prefixo%'],
     );
 
     Map<String, Map<String, dynamic>> mapa = {};
-    for (var row in result) {
-      mapa[row['data'].toString()] = row;
+    for (var reg in results) {
+      mapa[reg['data'].toString()] = reg;
     }
     return mapa;
   }
 
   Future<List<Map<String, dynamic>>> getRegistosAno(int ano) async {
     final db = await instance.database;
-    return await db.query(
+    final results = await db.query(
       'registos',
-      where: "data LIKE ?",
-      whereArgs: ["$ano-%"],
+      where: 'data LIKE ?',
+      whereArgs: ['$ano-%'],
+      orderBy: 'data ASC',
     );
+    return results;
   }
 
-  Future<int> guardarRegistoCompleto({
-    required String data,
-    required String tipoDia,
-    required double horasContratadas,
-    required String horaInicio,
-    required String horaFim,
-    required String almocoInicio,
-    required String almocoFim,
-    required double horasEfetivas,
-    required double horasExtraPagas,
-    required double horasDescontoSalario,
-    required String acaoExcesso,
-    required String acaoFalta,
-    required String tipoJustificacao,
-    required int incluiSubsidio,
-  }) async {
-    final db = await instance.database;
-    return await db.insert(
-      'registos',
-      {
-        'data': data,
-        'tipoDia': tipoDia,
-        'horasContratadas': horasContratadas,
-        'horaInicio': horaInicio,
-        'horaFim': horaFim,
-        'almocoInicio': almocoInicio,
-        'almocoFim': almocoFim,
-        'horasEfetivas': horasEfetivas,
-        'horasExtraPagas': horasExtraPagas,
-        'horasDescontoSalario': horasDescontoSalario,
-        'acaoExcesso': acaoExcesso,
-        'acaoFalta': acaoFalta,
-        'tipoJustificacao': tipoJustificacao,
-        'incluiSubsidio': incluiSubsidio,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
-  }
-
-  // --- TOTAIS GERAIS E BANCO DE HORAS (COM DESCONTO CORRETO) ---
   Future<Map<String, double>> getTotaisGerais() async {
     final db = await instance.database;
-    final registos = await db.query('registos');
-    
-    double totalCreditoTrabalho = 0.0;
-    double totalDebitoBanco = 0.0;
-    double totalDescontoSalario = 0.0;
-    double totalExtraPago = 0.0;
-    double totalFerias = 0.0;
-    double totalFolgas = 0.0;
-    double totalSubsidiosAlimentacao = 0.0;
-
     final perfil = await getPerfil();
     double salarioBase = (perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
-    double valorSubsidioDiario = (perfil['valorSubsidioAlimentacao'] as num?)?.toDouble() ?? 6.0;
-    double valorHoraBase = salarioBase / 174.0;
 
-    for (var reg in registos) {
-      String tipo = reg['tipoDia']?.toString() ?? 'Trabalho';
-      double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
-      double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
-      int incluiSub = (reg['incluiSubsidio'] as num?)?.toInt() ?? 0;
+    final results = await db.query('registos');
+    double creditoHoras = 0.0;
+    double ferias = 0.0;
+    double folgas = 0.0;
 
-      if (incluiSub == 1) {
-        totalSubsidiosAlimentacao += valorSubsidioDiario;
-      }
+    for (var reg in results) {
+      String tipo = reg['tipoDia']?.toString() ?? '';
+      if (tipo == 'Férias') ferias += 1.0;
+      if (tipo == 'Folga') folgas += 1.0;
 
-      if (tipo == 'Férias') {
-        totalFerias += 1.0;
-      } else if (tipo == 'Folga') {
-        totalFolgas += 1.0;
-      } else if (tipo == 'Trabalho') {
-        double diff = hEfetivas - hContratadas;
-        if (diff > 0.01) {
-          String acao = reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
-          if (acao == 'Banco de Horas') {
-            totalCreditoTrabalho += diff;
-          } else if (acao == 'Pagar') {
-            totalExtraPago += diff;
-          }
-        } else if (diff < -0.01) {
-          String acaoFalta = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
-          if (acaoFalta == 'Descontar no Banco') {
-            totalDebitoBanco += diff.abs();
-          } else if (acaoFalta == 'Descontar no Salário') {
-            totalDescontoSalario += diff.abs();
-          }
-        }
-      } else if (tipo == 'Falta') {
-        String acaoFalta = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
-        if (acaoFalta == 'Descontar no Banco') {
-          totalDebitoBanco += hContratadas > 0 ? hContratadas : 8.0;
-        } else if (acaoFalta == 'Descontar no Salário') {
-          totalDescontoSalario += hContratadas > 0 ? hContratadas : 8.0;
-        }
+      if (tipo == 'Trabalho' || tipo == 'Folga Trabalhada') {
+        double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+        double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+        creditoHoras += (hEfetivas - hContratadas);
       }
     }
 
-    double bancoHorasLiquido = totalCreditoTrabalho - totalDebitoBanco;
-    double valorHorasExtra = totalExtraPago * valorHoraBase * 1.25;
-    double valorDescontosSalario = totalDescontoSalario * valorHoraBase;
-    double valorTotalHorasAReceber = valorHorasExtra - valorDescontosSalario;
-    double totalGeralReceber = salarioBase + valorTotalHorasAReceber + totalSubsidiosAlimentacao;
-
     return {
-      'credito': bancoHorasLiquido,
-      'debito': totalDebitoBanco,
-      'ferias': totalFerias,
-      'folgas': totalFolgas,
       'salarioBase': salarioBase,
-      'valorHorasAReceber': valorTotalHorasAReceber,
-      'subsidioAlimentacao': totalSubsidiosAlimentacao,
-      'totalAReceber': totalGeralReceber,
+      'credito': creditoHoras,
+      'ferias': ferias,
+      'folgas': folgas,
     };
   }
 
@@ -249,45 +205,47 @@ class DatabaseHelper {
   Future<bool> exportarEGuardarBaseDeDados() async {
     try {
       final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gestao_horarios_v3.db');
+      final path = join(dbPath, 'gestao_horarios.db');
       final dbFile = File(path);
 
-      if (!await dbFile.exists()) return false;
-
-      String? outputPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Guardar Backup da Base de Dados',
-        fileName: 'backup_gestao_horarios_${DateTime.now().millisecondsSinceEpoch}.db',
-      );
-
-      if (outputPath != null) {
-        await dbFile.copy(outputPath);
-        return true;
+      Directory? downloadsDir = Directory('/storage/emulated/0/Download');
+      if (!await downloadsDir.exists()) {
+        downloadsDir = await getExternalStorageDirectory();
       }
-      return false;
+      downloadsDir ??= await getApplicationDocumentsDirectory();
+
+      final backupPath = join(
+        downloadsDir.path, 
+        'backup_gestao_horarios_${DateTime.now().millisecondsSinceEpoch}.db'
+      );
+      await dbFile.copy(backupPath);
+      return true;
     } catch (_) {
       return false;
     }
   }
 
-  Future<bool> restaurarBaseDeDadosDeFicheiro(String sourcePath) async {
+  Future<bool> restaurarBaseDeDados(String caminhoFicheiro) async {
     try {
       final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gestao_horarios_v3.db');
+      final path = join(dbPath, 'gestao_horarios.db');
       
       if (_database != null) {
         await _database!.close();
         _database = null;
       }
 
-      final sourceFile = File(sourcePath);
-      if (await sourceFile.exists()) {
-        await sourceFile.copy(path);
-        _database = await _initDB('gestao_horarios_v3.db');
-        return true;
-      }
-      return false;
+      final origem = File(caminhoFicheiro);
+      await origem.copy(path);
+      
+      _database = await _initDB('gestao_horarios.db');
+      return true;
     } catch (_) {
       return false;
     }
+  }
+
+  Future<bool> restaurarBaseDeDadosDeFicheiro(String caminhoFicheiro) async {
+    return await restaurarBaseDeDados(caminhoFicheiro);
   }
 }
