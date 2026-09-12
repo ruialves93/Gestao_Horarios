@@ -9,36 +9,36 @@ class DayModal {
     required VoidCallback onAtualizado,
   }) async {
     String dataStr = "${dia.year}-${dia.month.toString().padLeft(2, '0')}-${dia.day.toString().padLeft(2, '0')}";
-    
-    Map<String, dynamic>? registoExistente = await DatabaseHelper.instance.getRegisto(dataStr);
+
+    Map<String, dynamic>? registoExistente;
+    try {
+      registoExistente = await DatabaseHelper.instance.getRegisto(dataStr);
+    } catch (e) {
+      debugPrint("Erro ao carregar registo prévio: $e");
+    }
+
+    if (!context.mounted) return;
 
     String tipoDia = registoExistente?['tipoDia'] ?? 'Trabalho';
     TimeOfDay horaInicio = _parseHora(registoExistente?['horaInicio'], const TimeOfDay(hour: 8, minute: 0));
     TimeOfDay horaFim = _parseHora(registoExistente?['horaFim'], const TimeOfDay(hour: 17, minute: 0));
-    
-    TimeOfDay? almocoInicio = registoExistente?['almocoInicio'] != null 
-        ? _parseHora(registoExistente?['almocoInicio'], const TimeOfDay(hour: 13, minute: 0)) 
+
+    TimeOfDay? almocoInicio = registoExistente?['almocoInicio'] != null
+        ? _parseHora(registoExistente?['almocoInicio'], const TimeOfDay(hour: 13, minute: 0))
         : null;
-    TimeOfDay? almocoFim = registoExistente?['almocoFim'] != null 
-        ? _parseHora(registoExistente?['almocoFim'], const TimeOfDay(hour: 14, minute: 0)) 
+    TimeOfDay? almocoFim = registoExistente?['almocoFim'] != null
+        ? _parseHora(registoExistente?['almocoFim'], const TimeOfDay(hour: 14, minute: 0))
         : null;
 
     double horasContratadas = (registoExistente?['horasContratadas'] as num?)?.toDouble() ?? 8.0;
     final horasContratadasController = TextEditingController(text: horasContratadas.toStringAsFixed(1));
 
     int incluiSubsidio = registoExistente?['incluiSubsidio'] ?? (tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada' ? 1 : 0);
-    
-    // Trabalho: Horas a mais -> Banco de Horas, Pagar, Voluntariado
-    String acaoExcesso = registoExistente?['acaoExcesso'] ?? 'Banco de Horas';
-    // Trabalho: Horas a menos -> Descontar no Banco, Descontar no Salário, Não faz nada
-    String acaoDefice = registoExistente?['acaoFalta'] ?? 'Descontar no Banco';
-    
-    // Falta: Justificada ou Injustificada
-    String subTipoFalta = registoExistente?['subTipoFalta'] ?? 'Injustificada';
-    // Falta: Descontar no Salário ou Banco de Horas
-    String acaoFaltaTratamento = registoExistente?['acaoFaltaTratamento'] ?? 'Descontar no Salário';
 
-    // Folga Trabalhada: Banco de Horas ou Salário
+    String acaoExcesso = registoExistente?['acaoExcesso'] ?? 'Banco de Horas';
+    String acaoDefice = registoExistente?['acaoFalta'] ?? 'Descontar no Banco';
+    String subTipoFalta = registoExistente?['subTipoFalta'] ?? 'Injustificada';
+    String acaoFaltaTratamento = registoExistente?['acaoFaltaTratamento'] ?? 'Descontar no Salário';
     String acaoFolgaTrabalhada = registoExistente?['acaoFolgaTrabalhada'] ?? 'Banco de Horas';
 
     final tiposDisponiveis = [
@@ -54,10 +54,9 @@ class DayModal {
       context: context,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) {
+      builder: (modalCtx) {
         return StatefulBuilder(
           builder: (context, setStateModal) {
-            // Calcular horas trabalhadas em tempo real
             double horasEfetivasCalc = 0.0;
             if (tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') {
               double totalMinutos = ((horaFim.hour * 60 + horaFim.minute) - (horaInicio.hour * 60 + horaInicio.minute)).toDouble();
@@ -68,12 +67,12 @@ class DayModal {
               horasEfetivasCalc = totalMinutos > 0 ? (totalMinutos / 60.0) : 0.0;
             }
 
-            double hContratadasParsed = double.tryParse(horasContratadasController.text) ?? 8.0;
+            double hContratadasParsed = double.tryParse(horasContratadasController.text.replaceAll(',', '.')) ?? 8.0;
             double diffHoras = horasEfetivasCalc - hContratadasParsed;
 
             return Padding(
               padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
+                bottom: MediaQuery.of(modalCtx).viewInsets.bottom,
                 left: 16,
                 right: 16,
                 top: 16,
@@ -90,12 +89,14 @@ class DayModal {
                           'Registo: ${dia.day.toString().padLeft(2, '0')}/${dia.month.toString().padLeft(2, '0')}/${dia.year}',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1A237E)),
                         ),
-                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.of(modalCtx).pop(),
+                        ),
                       ],
                     ),
                     const Divider(),
 
-                    // Botões de Seleção de Tipo de Dia
                     const Text('Selecione o Tipo de Dia:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 8),
                     Wrap(
@@ -108,29 +109,21 @@ class DayModal {
                           onTap: () {
                             setStateModal(() {
                               tipoDia = tipo['nome'] as String;
-                              if (tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') {
-                                incluiSubsidio = 1;
-                              } else {
-                                incluiSubsidio = 0;
-                              }
+                              incluiSubsidio = (tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') ? 1 : 0;
                             });
                           },
                           borderRadius: BorderRadius.circular(10),
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                             decoration: BoxDecoration(
-                              color: selecionado ? corTipo : corTipo.withOpacity(0.08),
+                              color: selecionado ? corTipo : corTipo.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(color: corTipo, width: selecionado ? 2 : 1),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(
-                                  tipo['icone'] as IconData,
-                                  size: 16,
-                                  color: selecionado ? Colors.white : corTipo,
-                                ),
+                                Icon(tipo['icone'] as IconData, size: 16, color: selecionado ? Colors.white : corTipo),
                                 const SizedBox(width: 6),
                                 Text(
                                   tipo['nome'] as String,
@@ -148,15 +141,11 @@ class DayModal {
                     ),
                     const SizedBox(height: 14),
 
-                    // Campo editável de horas a trabalhar no dia
                     Row(
                       children: [
                         const Expanded(
                           flex: 2,
-                          child: Text(
-                            'Horas previstas no dia (h):',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
+                          child: Text('Horas previstas no dia (h):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         ),
                         SizedBox(
                           width: 80,
@@ -175,7 +164,6 @@ class DayModal {
                     ),
                     const SizedBox(height: 12),
 
-                    // Campos para Trabalho ou Folga Trabalhada
                     if (tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') ...[
                       Row(
                         children: [
@@ -184,7 +172,7 @@ class DayModal {
                               label: 'Hora Início',
                               time: horaInicio,
                               onTap: () async {
-                                TimeOfDay? picked = await showTimePicker(context: context, initialTime: horaInicio);
+                                TimeOfDay? picked = await showTimePicker(context: modalCtx, initialTime: horaInicio);
                                 if (picked != null) setStateModal(() => horaInicio = picked);
                               },
                             ),
@@ -195,7 +183,7 @@ class DayModal {
                               label: 'Hora Fim',
                               time: horaFim,
                               onTap: () async {
-                                TimeOfDay? picked = await showTimePicker(context: context, initialTime: horaFim);
+                                TimeOfDay? picked = await showTimePicker(context: modalCtx, initialTime: horaFim);
                                 if (picked != null) setStateModal(() => horaFim = picked);
                               },
                             ),
@@ -210,7 +198,7 @@ class DayModal {
                               label: 'Almoço Início (opcional)',
                               time: almocoInicio,
                               onTap: () async {
-                                TimeOfDay? picked = await showTimePicker(context: context, initialTime: almocoInicio ?? const TimeOfDay(hour: 13, minute: 0));
+                                TimeOfDay? picked = await showTimePicker(context: modalCtx, initialTime: almocoInicio ?? const TimeOfDay(hour: 13, minute: 0));
                                 if (picked != null) setStateModal(() => almocoInicio = picked);
                               },
                             ),
@@ -221,7 +209,7 @@ class DayModal {
                               label: 'Almoço Fim (opcional)',
                               time: almocoFim,
                               onTap: () async {
-                                TimeOfDay? picked = await showTimePicker(context: context, initialTime: almocoFim ?? const TimeOfDay(hour: 14, minute: 0));
+                                TimeOfDay? picked = await showTimePicker(context: modalCtx, initialTime: almocoFim ?? const TimeOfDay(hour: 14, minute: 0));
                                 if (picked != null) setStateModal(() => almocoFim = picked);
                               },
                             ),
@@ -239,12 +227,11 @@ class DayModal {
                       ),
                       const SizedBox(height: 10),
 
-                      // Pergunta de horas extras em Trabalho normal
                       if (tipoDia == 'Trabalho' && diffHoras > 0.01) ...[
                         const Text('Destino das Horas Extras:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         const SizedBox(height: 4),
                         DropdownButtonFormField<String>(
-                          value: acaoExcesso,
+                          initialValue: acaoExcesso,
                           decoration: InputDecoration(
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -259,12 +246,11 @@ class DayModal {
                         const SizedBox(height: 10),
                       ],
 
-                      // Pergunta de horas a menos em Trabalho normal
                       if (tipoDia == 'Trabalho' && diffHoras < -0.01) ...[
                         const Text('Horas a menos trabalhadas (défice):', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         const SizedBox(height: 4),
                         DropdownButtonFormField<String>(
-                          value: acaoDefice,
+                          initialValue: acaoDefice,
                           decoration: InputDecoration(
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -279,12 +265,11 @@ class DayModal {
                         const SizedBox(height: 10),
                       ],
 
-                      // Pergunta para Folga Trabalhada: Banco de Horas ou Salário
                       if (tipoDia == 'Folga Trabalhada') ...[
                         const Text('Destino da Folga Trabalhada:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                         const SizedBox(height: 4),
                         DropdownButtonFormField<String>(
-                          value: acaoFolgaTrabalhada,
+                          initialValue: acaoFolgaTrabalhada,
                           decoration: InputDecoration(
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -300,12 +285,11 @@ class DayModal {
                       ],
                     ],
 
-                    // Falta: Justificada/Injustificada e Salário/Banco
                     if (tipoDia == 'Falta') ...[
                       const Text('Classificação da Falta:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       const SizedBox(height: 4),
                       DropdownButtonFormField<String>(
-                        value: subTipoFalta,
+                        initialValue: subTipoFalta,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -321,7 +305,7 @@ class DayModal {
                       const Text('Onde aplicar o desconto da Falta?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       const SizedBox(height: 4),
                       DropdownButtonFormField<String>(
-                        value: acaoFaltaTratamento,
+                        initialValue: acaoFaltaTratamento,
                         decoration: InputDecoration(
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -336,7 +320,6 @@ class DayModal {
                       const SizedBox(height: 10),
                     ],
 
-                    // Baixa: Informação de desconto direto no salário
                     if (tipoDia == 'Baixa') ...[
                       Container(
                         padding: const EdgeInsets.all(10),
@@ -345,13 +328,13 @@ class DayModal {
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.red.shade300),
                         ),
-                        child: Row(
+                        child: const Row(
                           children: [
-                            Icon(Icons.info_outline, color: Colors.red.shade800, size: 18),
-                            const SizedBox(width: 8),
-                            const Expanded(
+                            Icon(Icons.info_outline, color: Color(0xFFC62828), size: 18),
+                            SizedBox(width: 8),
+                            Expanded(
                               child: Text(
-                                'A Baixa médica é automaticamente configurada para descontar o dia no salário.',
+                                'A Baixa médica desconta o dia no salário.',
                                 style: TextStyle(fontSize: 12, color: Colors.black87),
                               ),
                             ),
@@ -386,12 +369,20 @@ class DayModal {
                               icon: const Icon(Icons.delete, size: 18),
                               label: const Text('Apagar'),
                               onPressed: () async {
-                                await DatabaseHelper.instance.deletarRegisto(dataStr);
-                                Navigator.pop(ctx);
-                                onAtualizado();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Registo apagado com sucesso!')),
-                                );
+                                final nav = Navigator.of(modalCtx);
+                                final messenger = ScaffoldMessenger.of(context);
+                                try {
+                                  await DatabaseHelper.instance.deletarRegisto(dataStr);
+                                  nav.pop();
+                                  onAtualizado();
+                                  messenger.showSnackBar(
+                                    const SnackBar(content: Text('Registo apagado com sucesso!')),
+                                  );
+                                } catch (e) {
+                                  messenger.showSnackBar(
+                                    SnackBar(content: Text('Erro ao apagar: $e'), backgroundColor: Colors.red),
+                                  );
+                                }
                               },
                             ),
                           ),
@@ -407,57 +398,68 @@ class DayModal {
                             ),
                             child: const Text('Guardar Registo', style: TextStyle(fontWeight: FontWeight.bold)),
                             onPressed: () async {
-                              double hPrevistas = double.tryParse(horasContratadasController.text) ?? 8.0;
-                              double horasEfetivasFinais = 0.0;
-                              double horasExtraPagas = 0.0;
-                              double horasDescontoSalario = 0.0;
+                              final nav = Navigator.of(modalCtx);
+                              final messenger = ScaffoldMessenger.of(context);
+                              try {
+                                double hPrevistas = double.tryParse(horasContratadasController.text.replaceAll(',', '.')) ?? 8.0;
+                                double horasEfetivasFinais = 0.0;
+                                double horasExtraPagas = 0.0;
+                                double horasDescontoSalario = 0.0;
 
-                              if (tipoDia == 'Trabalho') {
-                                horasEfetivasFinais = horasEfetivasCalc;
-                                double diff = horasEfetivasCalc - hPrevistas;
-                                if (diff > 0.01 && acaoExcesso == 'Pagar') {
-                                  horasExtraPagas = diff;
-                                } else if (diff < -0.01 && acaoDefice == 'Descontar no Salário') {
-                                  horasDescontoSalario = diff.abs();
-                                }
-                              } else if (tipoDia == 'Folga Trabalhada') {
-                                horasEfetivasFinais = horasEfetivasCalc;
-                                if (acaoFolgaTrabalhada == 'Salário') {
-                                  horasExtraPagas = horasEfetivasCalc;
-                                }
-                              } else if (tipoDia == 'Falta') {
-                                if (acaoFaltaTratamento == 'Descontar no Salário') {
+                                if (tipoDia == 'Trabalho') {
+                                  horasEfetivasFinais = horasEfetivasCalc;
+                                  double diff = horasEfetivasCalc - hPrevistas;
+                                  if (diff > 0.01 && acaoExcesso == 'Pagar') {
+                                    horasExtraPagas = diff;
+                                  } else if (diff < -0.01 && acaoDefice == 'Descontar no Salário') {
+                                    horasDescontoSalario = diff.abs();
+                                  }
+                                } else if (tipoDia == 'Folga Trabalhada') {
+                                  horasEfetivasFinais = horasEfetivasCalc;
+                                  if (acaoFolgaTrabalhada == 'Salário') {
+                                    horasExtraPagas = horasEfetivasCalc;
+                                  }
+                                } else if (tipoDia == 'Falta') {
+                                  if (acaoFaltaTratamento == 'Descontar no Salário') {
+                                    horasDescontoSalario = hPrevistas;
+                                  }
+                                } else if (tipoDia == 'Baixa') {
                                   horasDescontoSalario = hPrevistas;
                                 }
-                              } else if (tipoDia == 'Baixa') {
-                                horasDescontoSalario = hPrevistas;
+
+                                Map<String, dynamic> dadosRegisto = {
+                                  'data': dataStr,
+                                  'tipoDia': tipoDia,
+                                  'horaInicio': '${horaInicio.hour.toString().padLeft(2, '0')}:${horaInicio.minute.toString().padLeft(2, '0')}',
+                                  'horaFim': '${horaFim.hour.toString().padLeft(2, '0')}:${horaFim.minute.toString().padLeft(2, '0')}',
+                                  'almocoInicio': almocoInicio != null ? '${almocoInicio!.hour.toString().padLeft(2, '0')}:${almocoInicio!.minute.toString().padLeft(2, '0')}' : null,
+                                  'almocoFim': almocoFim != null ? '${almocoFim!.hour.toString().padLeft(2, '0')}:${almocoFim!.minute.toString().padLeft(2, '0')}' : null,
+                                  'horasEfetivas': horasEfetivasFinais,
+                                  'horasContratadas': hPrevistas,
+                                  'incluiSubsidio': incluiSubsidio,
+                                  'acaoExcesso': acaoExcesso,
+                                  'acaoFalta': acaoDefice,
+                                  'acaoFolgaTrabalhada': acaoFolgaTrabalhada,
+                                  'subTipoFalta': subTipoFalta,
+                                  'acaoFaltaTratamento': acaoFaltaTratamento,
+                                  'horasExtraPagas': horasExtraPagas,
+                                  'horasDescontoSalario': horasDescontoSalario,
+                                };
+
+                                await DatabaseHelper.instance.salvarRegisto(dadosRegisto);
+
+                                nav.pop();
+                                onAtualizado();
+
+                                messenger.showSnackBar(
+                                  const SnackBar(content: Text('Registo guardado com sucesso!'), backgroundColor: Colors.green),
+                                );
+                              } catch (e) {
+                                debugPrint("Erro ao salvar registo: $e");
+                                messenger.showSnackBar(
+                                  SnackBar(content: Text('Erro: $e'), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
+                                );
                               }
-
-                              Map<String, dynamic> dadosRegisto = {
-                                'data': dataStr,
-                                'tipoDia': tipoDia,
-                                'horaInicio': '${horaInicio.hour.toString().padLeft(2, '0')}:${horaInicio.minute.toString().padLeft(2, '0')}',
-                                'horaFim': '${horaFim.hour.toString().padLeft(2, '0')}:${horaFim.minute.toString().padLeft(2, '0')}',
-                                'almocoInicio': almocoInicio != null ? '${almocoInicio!.hour.toString().padLeft(2, '0')}:${almocoInicio!.minute.toString().padLeft(2, '0')}' : null,
-                                'almocoFim': almocoFim != null ? '${almocoFim!.hour.toString().padLeft(2, '0')}:${almocoFim!.minute.toString().padLeft(2, '0')}' : null,
-                                'horasEfetivas': horasEfetivasFinais,
-                                'horasContratadas': hPrevistas,
-                                'incluiSubsidio': incluiSubsidio,
-                                'acaoExcesso': acaoExcesso,
-                                'acaoFalta': acaoDefice,
-                                'acaoFolgaTrabalhada': acaoFolgaTrabalhada,
-                                'subTipoFalta': subTipoFalta,
-                                'acaoFaltaTratamento': acaoFaltaTratamento,
-                                'horasExtraPagas': horasExtraPagas,
-                                'horasDescontoSalario': horasDescontoSalario,
-                              };
-
-                              await DatabaseHelper.instance.salvarRegisto(dadosRegisto);
-                              Navigator.pop(ctx);
-                              onAtualizado();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Registo guardado com sucesso!')),
-                              );
                             },
                           ),
                         ),

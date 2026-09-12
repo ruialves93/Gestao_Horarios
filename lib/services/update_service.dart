@@ -5,107 +5,136 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class UpdateService {
-  // Ajusta o utilizador e o repositório conforme o teu GitHub
-  static const String _owner = 'ruialves93';
-  static const String _repo = 'gestao_horarios';
+  // Repositório correto no GitHub
+  static const String _githubRepo = 'ruialves93/Gestao_Horarios'; 
 
+  /// Verifica se há nova versão no GitHub.
   static Future<void> verificarEForcarAtualizacao(
     BuildContext context, {
     bool manual = false,
     Function(String)? onFeedback,
   }) async {
     try {
-      final url = Uri.parse('https://api.github.com/repos/$_owner/$_repo/releases/latest');
+      // Define como 'false' para consultar o GitHub real agora que o link está correto
+      const bool ativarSimulacaoTeste = false; 
       
-      // O GitHub exige obrigatoriamente um User-Agent
-      final response = await http.get(
-        url,
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'GestaoHorarios-App',
-        },
-      ).timeout(const Duration(seconds: 8));
+      if (ativarSimulacaoTeste) {
+        if (context.mounted) {
+          _mostrarDialogoAtualizacao(
+            context, 
+            '1.0.4 (Teste)', 
+            'https://github.com/$_githubRepo/releases'
+          );
+        }
+        return;
+      }
+
+      final packageInfo = await PackageInfo.fromPlatform();
+      String versaoAtualStr = packageInfo.version; 
+      if (versaoAtualStr.isEmpty || versaoAtualStr == '1.0.0') {
+        versaoAtualStr = '1.0.3';
+      }
+
+      final url = Uri.parse('https://api.github.com/repos/$_githubRepo/releases/latest');
+      final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        String latestTag = (data['tag_name'] ?? '').toString().replaceAll('v', '').trim();
-        String htmlUrl = data['html_url'] ?? 'https://github.com/$_owner/$_repo/releases';
+        final data = json.decode(response.body);
+        String tagVersaoGitHub = data['tag_name']?.toString() ?? '';
+        String urlDownload = data['html_url']?.toString() ?? 'https://github.com/$_githubRepo/releases';
 
-        PackageInfo packageInfo = await PackageInfo.fromPlatform();
-        String currentVersion = packageInfo.version.trim();
+        String versaoGitHubLimpa = tagVersaoGitHub.startsWith('v') ? tagVersaoGitHub.substring(1) : tagVersaoGitHub;
 
-        if (_versaoMaisRecente(latestTag, currentVersion)) {
-          if (context.mounted) {
-            _mostrarDialogoAtualizacao(context, latestTag, htmlUrl);
+        if (versaoGitHubLimpa.isNotEmpty) {
+          bool temNovaVersao = _compararVersoes(versaoGitHubLimpa, versaoAtualStr);
+
+          if (temNovaVersao) {
+            if (context.mounted) {
+              _mostrarDialogoAtualizacao(context, versaoGitHubLimpa, urlDownload);
+            }
+          } else if (manual) {
+            if (onFeedback != null) {
+              onFeedback('A sua aplicação (v$versaoAtualStr) já está atualizada com a versão mais recente.');
+            }
           }
-        } else {
-          if (manual && onFeedback != null) {
-            onFeedback('A aplicação já se encontra na versão mais recente (v$currentVersion).');
-          }
+        } else if (manual && onFeedback != null) {
+          onFeedback('Não foi encontrada nenhuma versão válida no GitHub.');
         }
       } else if (response.statusCode == 404) {
         if (manual && onFeedback != null) {
-          onFeedback('Nenhum release público encontrado no GitHub.');
+          onFeedback('Ainda não existem versões publicadas nas Releases do GitHub.');
         }
       } else {
         if (manual && onFeedback != null) {
-          onFeedback('GitHub inacessível (Código HTTP ${response.statusCode}).');
+          onFeedback('Erro ao consultar GitHub (Código: ${response.statusCode}).');
         }
       }
     } catch (e) {
       if (manual && onFeedback != null) {
-        onFeedback('Não foi possível verificar atualizações. Verifique a ligação à Internet.');
+        onFeedback('Sem ligação à internet ou erro de rede.');
       }
     }
   }
 
-  static bool _versaoMaisRecente(String remote, String current) {
-    if (remote.isEmpty || current.isEmpty) return false;
-    List<int> rParts = remote.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    List<int> cParts = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+  static bool _compararVersoes(String versaoGitHub, String versaoAtual) {
+    List<int> partesGit = versaoGitHub.split('.').map((e) => int.tryParse(e.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0).toList();
+    List<int> partesAtual = versaoAtual.split('.').map((e) => int.tryParse(e.replaceAll(RegExp(r'[^0-9]'), '')) ?? 0).toList();
 
-    for (int i = 0; i < rParts.length && i < cParts.length; i++) {
-      if (rParts[i] > cParts[i]) return true;
-      if (rParts[i] < cParts[i]) return false;
+    while (partesGit.length < 3) partesGit.add(0);
+    while (partesAtual.length < 3) partesAtual.add(0);
+
+    for (int i = 0; i < 3; i++) {
+      if (partesGit[i] > partesAtual[i]) return true;
+      if (partesGit[i] < partesAtual[i]) return false;
     }
-    return rParts.length > cParts.length;
+    return false; 
   }
 
-  static void _mostrarDialogoAtualizacao(BuildContext context, String novaVersao, String linkDownload) {
+  static void _mostrarDialogoAtualizacao(BuildContext context, String novaVersao, String urlDownload) {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.system_update, color: Color(0xFF1A237E)),
-            SizedBox(width: 8),
-            Text('Nova Versão Disponível', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          ],
-        ),
-        content: Text('Está disponível a versão v$novaVersao no GitHub. Deseja descarregar agora?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Mais Tarde'),
+      builder: (ctx) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              const Icon(Icons.system_update, color: Color(0xFF1A237E), size: 28),
+              const SizedBox(width: 10),
+              const Text('Nova Versão Disponível', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+            ],
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1A237E),
-              foregroundColor: Colors.white,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Está disponível a versão $novaVersao da aplicação no GitHub.'),
+              const SizedBox(height: 10),
+              const Text('Recomendamos que atualize para usufruir das últimas melhorias e correções.'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Mais Tarde', style: TextStyle(color: Colors.grey)),
             ),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              final uri = Uri.parse(linkDownload);
-              if (await canLaunchUrl(uri)) {
-                await launchUrl(uri, mode: LaunchMode.externalApplication);
-              }
-            },
-            child: const Text('Atualizar'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1A237E),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () async {
+                final Uri url = Uri.parse(urlDownload);
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              },
+              child: const Text('Atualizar Agora', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        );
+      },
     );
   }
 }

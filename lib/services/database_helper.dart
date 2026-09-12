@@ -21,7 +21,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3, // Versão atualizada para incluir biometria
       onCreate: _criarBD,
       onOpen: _verificarEAtualizarColunas,
     );
@@ -36,7 +36,10 @@ class DatabaseHelper {
         nomeEmpresa TEXT,
         salarioBase REAL,
         valorSubsidioAlimentacao REAL,
-        pinSeguranca TEXT
+        pinSeguranca TEXT,
+        pinAtivo INTEGER,
+        codigoPin TEXT,
+        biometriaAtiva INTEGER DEFAULT 0
       )
     ''');
 
@@ -69,25 +72,46 @@ class DatabaseHelper {
       'salarioBase': 1000.0,
       'valorSubsidioAlimentacao': 6.0,
       'pinSeguranca': '',
+      'pinAtivo': 0,
+      'codigoPin': '',
+      'biometriaAtiva': 0,
     });
   }
 
   // Adiciona colunas em falta automaticamente sem apagar registos existentes
   Future<void> _verificarEAtualizarColunas(Database db) async {
     try {
-      final colunas = await db.rawQuery('PRAGMA table_info(registos)');
-      final nomesColunas = colunas.map((c) => c['name'] as String).toSet();
+      // Verificar colunas na tabela registos
+      final colunasRegistos = await db.rawQuery('PRAGMA table_info(registos)');
+      final nomesColunasRegistos = colunasRegistos.map((c) => c['name'] as String).toSet();
 
-      final colunasNecessarias = {
+      final colunasNecessariasRegistos = {
         'subTipoFalta': 'TEXT',
         'acaoFaltaTratamento': 'TEXT',
         'horasExtraPagas': 'REAL',
         'horasDescontoSalario': 'REAL',
       };
 
-      for (var entry in colunasNecessarias.entries) {
-        if (!nomesColunas.contains(entry.key)) {
+      for (var entry in colunasNecessariasRegistos.entries) {
+        if (!nomesColunasRegistos.contains(entry.key)) {
           await db.execute('ALTER TABLE registos ADD COLUMN ${entry.key} ${entry.value}');
+        }
+      }
+
+      // Verificar colunas na tabela perfil
+      final colunasPerfil = await db.rawQuery('PRAGMA table_info(perfil)');
+      final nomesColunasPerfil = colunasPerfil.map((c) => c['name'] as String).toSet();
+
+      final colunasNecessariasPerfil = {
+        'pinAtivo': 'INTEGER DEFAULT 0',
+        'codigoPin': 'TEXT DEFAULT ""',
+        'pinSeguranca': 'TEXT DEFAULT ""',
+        'biometriaAtiva': 'INTEGER DEFAULT 0',
+      };
+
+      for (var entry in colunasNecessariasPerfil.entries) {
+        if (!nomesColunasPerfil.contains(entry.key)) {
+          await db.execute('ALTER TABLE perfil ADD COLUMN ${entry.key} ${entry.value}');
         }
       }
     } catch (_) {}
@@ -109,7 +133,8 @@ class DatabaseHelper {
     if (count == null || count == 0) {
       return await db.insert('perfil', perfil);
     } else {
-      return await db.update('perfil', perfil, where: 'id = ?', whereArgs: [1]);
+      int id = perfil['id'] ?? 1;
+      return await db.update('perfil', perfil, where: 'id = ?', whereArgs: [id]);
     }
   }
 
