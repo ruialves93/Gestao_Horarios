@@ -18,7 +18,7 @@ dependencies:
   url_launcher: ^6.2.5
   local_auth: ^2.3.0
   http: ^1.2.1
-  package_info_plus: ^5.0.0
+  package_info_plus: ^8.3.1  # <--- Atualizado para resolver o conflito com o web package
   google_sign_in: ^6.2.1  # Adicionado para autenticação Google
   googleapis: ^13.2.0      # Adicionado para interagir com o Google Drive
   intl: ^0.20.3
