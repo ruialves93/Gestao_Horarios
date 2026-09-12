@@ -9,6 +9,32 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 class ExportHelper {
+  /// Função auxiliar para formatar horas decimais para o formato "HH:mm" (ex: 0.3 -> "00:18h", 1.5 -> "+01:30h")
+  static String _formatarHorasPdf(double horasDecimais, {bool incluirSinal = true}) {
+    int minutosTotais = (horasDecimais * 60).round();
+    bool negativo = minutosTotais < 0;
+    minutosTotais = minutosTotais.abs();
+
+    int horas = minutosTotais ~/ 60;
+    int minutos = minutosTotais % 60;
+
+    String hStr = horas.toString().padLeft(2, '0');
+    String mStr = minutos.toString().padLeft(2, '0');
+    String sinalStr = '';
+
+    if (incluirSinal) {
+      if (negativo) {
+        sinalStr = '-';
+      } else if (horasDecimais > 0) {
+        sinalStr = '+';
+      }
+    } else if (negativo) {
+      sinalStr = '-';
+    }
+
+    return '$sinalStr$hStr:$mStr h';
+  }
+
   // ---------------------------------------------------------------------------
   // 1. GERAR PDF RESUMO ANUAL (BANCO DE HORAS & RENDIMENTOS - LEI N.º 7/2009)
   // ---------------------------------------------------------------------------
@@ -126,9 +152,9 @@ class ExportHelper {
       double saldoMes = mGanhas - mDescontadas;
       dadosTabela.add([
         nomesMeses[m - 1],
-        "${mGanhas.toStringAsFixed(1)}h",
-        "${mDescontadas.toStringAsFixed(1)}h",
-        "${saldoMes >= 0 ? '+' : ''}${saldoMes.toStringAsFixed(1)}h",
+        _formatarHorasPdf(mGanhas),
+        _formatarHorasPdf(mDescontadas, incluirSinal: false),
+        _formatarHorasPdf(saldoMes),
         "${mFerias}d",
         "${mFolgas}d",
         "${mFaltas}d",
@@ -169,9 +195,9 @@ class ExportHelper {
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              _construirCaixaResumoPdf('Total H. Ganhas', "+${totalHorasBancoGanhas.toStringAsFixed(1)}h", PdfColors.green800),
-              _construirCaixaResumoPdf('Total H. Descontadas', "-${totalHorasBancoDescontadas.toStringAsFixed(1)}h", PdfColors.red800),
-              _construirCaixaResumoPdf('Saldo Final Banco', "${(totalHorasBancoGanhas - totalHorasBancoDescontadas).toStringAsFixed(1)}h", PdfColors.indigo900),
+              _construirCaixaResumoPdf('Total H. Ganhas', _formatarHorasPdf(totalHorasBancoGanhas), PdfColors.green800),
+              _construirCaixaResumoPdf('Total H. Descontadas', _formatarHorasPdf(-totalHorasBancoDescontadas, incluirSinal: false), PdfColors.red800),
+              _construirCaixaResumoPdf('Saldo Final Banco', _formatarHorasPdf(totalHorasBancoGanhas - totalHorasBancoDescontadas), PdfColors.indigo900),
               _construirCaixaResumoPdf('Total Férias/Folgas', "${totalDiasFerias}d / ${totalDiasFolgas}d", PdfColors.blue800),
               _construirCaixaResumoPdf('Total Faltas/Baixas', "${totalDiasFaltas}d / ${totalDiasBaixas}d", PdfColors.orange900),
               _construirCaixaResumoPdf('Extras em EUR', "+${totalValorExtraEurosAnual.toStringAsFixed(2)} EUR", PdfColors.green900),
@@ -258,8 +284,8 @@ class ExportHelper {
       dadosTabela.add([
         data,
         tipo,
-        "${hContratadas.toStringAsFixed(1)}h",
-        "${hEfetivas.toStringAsFixed(1)}h",
+        _formatarHorasPdf(hContratadas, incluirSinal: false),
+        _formatarHorasPdf(hEfetivas, incluirSinal: false),
         extraDia > 0 ? "+${extraDia.toStringAsFixed(2)} EUR" : "-",
         descDia > 0 ? "-${descDia.toStringAsFixed(2)} EUR" : "-",
         subDia > 0 ? "${subDia.toStringAsFixed(2)} EUR" : "-",
@@ -379,9 +405,9 @@ class ExportHelper {
       dadosTabela.add([
         data,
         tipo,
-        "${hContratadas.toStringAsFixed(1)}h",
-        "${hEfetivas.toStringAsFixed(1)}h",
-        "${diff >= 0 ? '+' : ''}${diff.toStringAsFixed(1)}h",
+        _formatarHorasPdf(hContratadas, incluirSinal: false),
+        _formatarHorasPdf(hEfetivas, incluirSinal: false),
+        _formatarHorasPdf(diff),
         destino,
       ]);
     }
@@ -411,9 +437,9 @@ class ExportHelper {
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
             children: [
-              _construirCaixaResumoPdf('Horas Ganhas no Banco', "+${hGanhas.toStringAsFixed(1)}h", PdfColors.green800),
-              _construirCaixaResumoPdf('Horas Descontadas', "-${hDescontadas.toStringAsFixed(1)}h", PdfColors.red800),
-              _construirCaixaResumoPdf('Saldo do Mês', "${(hGanhas - hDescontadas) >= 0 ? '+' : ''}${(hGanhas - hDescontadas).toStringAsFixed(1)}h", PdfColors.indigo900),
+              _construirCaixaResumoPdf('Horas Ganhas no Banco', _formatarHorasPdf(hGanhas), PdfColors.green800),
+              _construirCaixaResumoPdf('Horas Descontadas', _formatarHorasPdf(-hDescontadas, incluirSinal: false), PdfColors.red800),
+              _construirCaixaResumoPdf('Saldo do Mês', _formatarHorasPdf(hGanhas - hDescontadas), PdfColors.indigo900),
             ],
           ),
           pw.Spacer(),
@@ -613,8 +639,8 @@ class ExportHelper {
                   _itemLegendaResumo('Férias', '$totalFeriasAno d', const PdfColor.fromInt(0xFF0288D1)),
                   _itemLegendaResumo('Baixas', '$totalBaixasAno d', const PdfColor.fromInt(0xFFC62828)),
                   _itemLegendaResumo('Faltas', '$totalFaltasAno d', const PdfColor.fromInt(0xFFE65100)),
-                  _itemLegendaResumo('H. Extras', '+${totalExtrasAno.toStringAsFixed(1)}h', const PdfColor.fromInt(0xFF2E7D32)),
-                  _itemLegendaResumo('H. Cortadas', '-${totalCortadasAno.toStringAsFixed(1)}h', const PdfColor.fromInt(0xFFB71C1C)),
+                  _itemLegendaResumo('H. Extras', _formatarHorasPdf(totalExtrasAno), const PdfColor.fromInt(0xFF2E7D32)),
+                  _itemLegendaResumo('H. Cortadas', _formatarHorasPdf(-totalCortadasAno, incluirSinal: false), const PdfColor.fromInt(0xFFB71C1C)),
                 ],
               ),
             ),
@@ -792,18 +818,18 @@ class ExportHelper {
         if (diff > 0.01) {
           corFundo = const PdfColor.fromInt(0xFFE8F5E9);
           corBorda = const PdfColor.fromInt(0xFF2E7D32);
-          etiqueta = '+${diff.toStringAsFixed(1)}h';
+          etiqueta = _formatarHorasPdf(diff);
           corTextoEtiqueta = const PdfColor.fromInt(0xFF2E7D32);
         } else if (diff < -0.01) {
           corFundo = const PdfColor.fromInt(0xFFFFCDD2);
           corBorda = const PdfColor.fromInt(0xFFB71C1C);
-          etiqueta = '${diff.toStringAsFixed(1)}h';
+          etiqueta = _formatarHorasPdf(diff, incluirSinal: false);
           corTextoEtiqueta = const PdfColor.fromInt(0xFFB71C1C);
         }
       } else if (tipo == 'Folga Trabalhada') {
         corFundo = const PdfColor.fromInt(0xFFE0F2F1);
         corBorda = const PdfColor.fromInt(0xFF00796B);
-        etiqueta = '+${hEfetivas.toStringAsFixed(1)}h';
+        etiqueta = _formatarHorasPdf(hEfetivas);
         corTextoEtiqueta = const PdfColor.fromInt(0xFF00796B);
       }
 
@@ -819,7 +845,7 @@ class ExportHelper {
             mainAxisAlignment: pw.MainAxisAlignment.center,
             children: [
               pw.Text('$dia', style: pw.TextStyle(fontSize: 5.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
-              pw.Text(etiqueta, style: pw.TextStyle(fontSize: 5.5, fontWeight: pw.FontWeight.bold, color: corTextoEtiqueta)),
+              pw.Text(etiqueta, style: pw.TextStyle(fontSize: 5.0, fontWeight: pw.FontWeight.bold, color: corTextoEtiqueta)),
             ],
           ),
         ),
@@ -854,7 +880,7 @@ class ExportHelper {
   }
 
   static pw.Widget _construirCabecalhoPdf({
-    pw.MemoryImage? logo,
+    required pw.MemoryImage? logo,
     required String titulo,
     required String subtitulo,
     required String trabalhador,
@@ -970,8 +996,6 @@ class ExportHelper {
                 ),
                 const material.SizedBox(height: 12),
                 const material.Divider(),
-
-                // 1. OPÇÃO: VER
                 material.ListTile(
                   leading: const material.CircleAvatar(
                     backgroundColor: material.Color(0xFFE8EAF6),
@@ -991,8 +1015,6 @@ class ExportHelper {
                     }
                   },
                 ),
-
-                // 2. OPÇÃO: PARTILHAR
                 material.ListTile(
                   leading: const material.CircleAvatar(
                     backgroundColor: material.Color(0xFFE8F5E9),
@@ -1010,8 +1032,6 @@ class ExportHelper {
                     }
                   },
                 ),
-
-                // 3. OPÇÃO: GUARDAR
                 material.ListTile(
                   leading: const material.CircleAvatar(
                     backgroundColor: material.Color(0xFFFFF3E0),
