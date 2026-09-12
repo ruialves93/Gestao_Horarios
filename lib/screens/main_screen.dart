@@ -64,6 +64,32 @@ class _MainScreenState extends State<MainScreen> {
     _carregarDados();
   }
 
+  /// Função auxiliar para formatar horas decimais em formato legível (ex: +01:30h ou -00:18h)
+  String _formatarHoras(double horasDecimais, {bool incluirSinal = true}) {
+    int minutosTotais = (horasDecimais * 60).round();
+    bool negativo = minutosTotais < 0;
+    minutosTotais = minutosTotais.abs();
+
+    int horas = minutosTotais ~/ 60;
+    int minutos = minutosTotais % 60;
+
+    String hStr = horas.toString().padLeft(2, '0');
+    String mStr = minutos.toString().padLeft(2, '0');
+    String sinalStr = '';
+
+    if (incluirSinal) {
+      if (negativo) {
+        sinalStr = '-';
+      } else if (horasDecimais > 0) {
+        sinalStr = '+';
+      }
+    } else if (negativo) {
+      sinalStr = '-';
+    }
+
+    return '$sinalStr$hStr:$mStr h';
+  }
+
   Future<void> _abrirCodigoTrabalho() async {
     final Uri url = Uri.parse('https://diariodarepublica.pt/dr/legislacao-consolidada/-/decreto-lei/2009-72215041');
     if (await canLaunchUrl(url)) {
@@ -613,11 +639,11 @@ class _MainScreenState extends State<MainScreen> {
                             children: [
                               _buildResumoItem(
                                 'Saldo Banco',
-                                '${saldoBancoHorasLiquido >= 0 ? '+' : ''}${saldoBancoHorasLiquido.toStringAsFixed(1)}h',
+                                _formatarHoras(saldoBancoHorasLiquido),
                                 saldoBancoHorasLiquido >= 0 ? Colors.indigo.shade900 : Colors.orange.shade900,
                               ),
-                              _buildResumoItem('H. Extras Banco', '+${bancoHorasMesGanhas.toStringAsFixed(1)}h', Colors.green.shade800),
-                              _buildResumoItem('H. Desconto Banco', '-${bancoHorasMesDescontadas.toStringAsFixed(1)}h', Colors.red.shade800),
+                              _buildResumoItem('H. Extras Banco', _formatarHoras(bancoHorasMesGanhas), Colors.green.shade800),
+                              _buildResumoItem('H. Desconto Banco', _formatarHoras(-bancoHorasMesDescontadas, incluirSinal: false), Colors.red.shade800),
                             ],
                           ),
                           const Divider(height: 8),
@@ -806,7 +832,7 @@ class _MainScreenState extends State<MainScreen> {
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
-                      diff > 0 ? '+${diff.toStringAsFixed(1)}h' : '${diff.toStringAsFixed(1)}h',
+                      _formatarHoras(diff),
                       style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
