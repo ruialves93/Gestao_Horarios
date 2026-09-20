@@ -20,6 +20,7 @@ class _MainScreenState extends State<MainScreen> {
 
   Map<String, dynamic> _perfil = {};
   Map<String, Map<String, dynamic>> _registosMes = {};
+  double _saldoBancoGlobal = 0.0;
   bool _carregando = true;
 
   @override
@@ -40,12 +41,17 @@ class _MainScreenState extends State<MainScreen> {
     setState(() => _carregando = true);
     final perfil = await DatabaseHelper.instance.getPerfil();
     final registos = await DatabaseHelper.instance.getRegistosMes(_anoAtual, _mesAtual);
-    await DatabaseHelper.instance.getTotaisGerais();
+    
+    // Obter totais gerais acumulados desde sempre da base de dados
+    final totaisGerais = await DatabaseHelper.instance.getTotaisGerais();
+    double ganhasGlobal = (totaisGerais['totalGanhas'] as num?)?.toDouble() ?? 0.0;
+    double descontadasGlobal = (totaisGerais['totalDescontadas'] as num?)?.toDouble() ?? 0.0;
 
     if (!mounted) return;
     setState(() {
       _perfil = perfil;
       _registosMes = registos;
+      _saldoBancoGlobal = ganhasGlobal - descontadasGlobal;
       _carregando = false;
     });
   }
@@ -451,7 +457,6 @@ class _MainScreenState extends State<MainScreen> {
       }
     });
 
-    double saldoBancoHorasLiquido = bancoHorasMesGanhas - bancoHorasMesDescontadas;
     double totalIliquidoAReceber = salarioBase + totalValorExtraEuros - totalValorDescontosEuros + totalSubsidioEuros;
 
     return Scaffold(
@@ -639,8 +644,8 @@ class _MainScreenState extends State<MainScreen> {
                             children: [
                               _buildResumoItem(
                                 'Saldo Banco',
-                                _formatarHoras(saldoBancoHorasLiquido),
-                                saldoBancoHorasLiquido >= 0 ? Colors.indigo.shade900 : Colors.orange.shade900,
+                                _formatarHoras(_saldoBancoGlobal),
+                                _saldoBancoGlobal >= 0 ? Colors.indigo.shade900 : Colors.orange.shade900,
                               ),
                               _buildResumoItem('H. Extras Banco', _formatarHoras(bancoHorasMesGanhas), Colors.green.shade800),
                               _buildResumoItem('H. Desconto Banco', _formatarHoras(-bancoHorasMesDescontadas, incluirSinal: false), Colors.red.shade800),

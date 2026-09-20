@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
+import 'dart:typed_data';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -203,47 +205,85 @@ class DatabaseHelper {
 
     final results = await db.query('registos');
     double creditoHoras = 0.0;
+    double totalGanhas = 0.0;
+    double totalDescontadas = 0.0;
     double ferias = 0.0;
     double folgas = 0.0;
 
     for (var reg in results) {
       String tipo = reg['tipoDia']?.toString() ?? '';
+      double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+      double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
+
       if (tipo == 'Férias') ferias += 1.0;
       if (tipo == 'Folga') folgas += 1.0;
 
-      if (tipo == 'Trabalho' || tipo == 'Folga Trabalhada') {
-        double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
-        double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
-        creditoHoras += (hEfetivas - hContratadas);
+      if (tipo == 'Trabalho') {
+        double diff = hEfetivas - hContratadas;
+        if (diff > 0.01) {
+          String acao = reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
+          if (acao == 'Banco de Horas') {
+            totalGanhas += diff;
+          }
+        } else if (diff < -0.01) {
+          String acaoFalta = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
+          if (acaoFalta == 'Descontar no Banco') {
+            totalDescontadas += diff.abs();
+          }
+        }
+      } else if (tipo == 'Folga Trabalhada') {
+        String acao = reg['acaoFolgaTrabalhada']?.toString() ?? 'Banco de Horas';
+        if (acao == 'Banco de Horas') {
+          totalGanhas += hEfetivas;
+        }
+      } else if (tipo == 'Falta') {
+        String acaoFaltaTratamento = reg['acaoFaltaTratamento']?.toString() ?? '';
+        if (acaoFaltaTratamento == 'Descontar no Banco de Horas') {
+          totalDescontadas += hContratadas;
+        }
       }
     }
+
+    creditoHoras = totalGanhas - totalDescontadas;
 
     return {
       'salarioBase': salarioBase,
       'credito': creditoHoras,
+      'totalGanhas': totalGanhas,
+      'totalDescontadas': totalDescontadas,
       'ferias': ferias,
       'folgas': folgas,
     };
   }
 
-  // --- BACKUP E RESTAURO ---
-  Future<bool> exportarEGuardarBaseDeDados() async {
+  // --- BACKUP E RESTAURO (COM SELETOR DE FICHEIROS NATIVO) ---
+ Future<bool> exportarEGuardarBaseDeDados() async {
     try {
       final dbPath = await getDatabasesPath();
       final path = join(dbPath, 'gestao_horarios.db');
       final dbFile = File(path);
 
-      Directory? downloadsDir = Directory('/storage/emulated/0/Download');
-      if (!await downloadsDir.exists()) {
-        downloadsDir = await getExternalStorageDirectory();
+      if (!await dbFile.exists()) {
+        return false;
       }
-      downloadsDir ??= await getApplicationDocumentsDirectory();
 
-      final backupPath = join(
-        downloadsDir.path, 
-        'backup_gestao_horarios_${DateTime.now().millisecondsSinceEpoch}.db'
+      // Lê os bytes e converte explicitamente para Uint8List
+      List<int> rawBytes = await dbFile.readAsBytes();
+      Uint8List bytes = Uint8List.fromList(rawBytes); // <--- Corrigido aqui
+
+      // Abre o seletor nativo do sistema para o utilizador escolher onde guardar
+      String? outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: 'Guardar Cópia da Base de Dados',
+        fileName: 'gestao_horarios_backup_${DateTime.now().toIso8601String().substring(0, 10)}.db',
+        bytes: bytes,
       );
-      await dbFile.copy(backupPath);
+
+      if (outputFile == null) {
+        return false; // Utilizador cancelou a operação
+      }
+
+      File destinationFile = File(outputFile);
+      await destinationFile.writeAsBytes(bytes);
       return true;
     } catch (_) {
       return false;
