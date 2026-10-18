@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../services/drive_service.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import '../services/database_helper.dart';
@@ -93,7 +93,7 @@ class SettingsModal {
 
       if (result != null && result.files.single.path != null) {
         String caminho = result.files.single.path!;
-        bool sucesso = await DatabaseHelper.instance.restaurarBaseDeDados(caminho);
+        bool sucesso = await DriveService.instance.restaurarFicheiroLocal(caminho);
         if (sucesso) {
           onAtualizado();
           onFeedback('Base de dados restaurada com sucesso!');

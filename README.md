@@ -4,10 +4,17 @@ Aplicação Flutter de registos de trabalho, férias e banco de horas.
 
 ## Cópias de segurança
 
-No menu **Cópias no Google Drive**, ligar a conta e escolher **Enviar cópia para o Drive**. A ligação à conta não cria uma cópia automaticamente. O envio só fica confirmado pela mensagem de sucesso e pela presença de `gestao_horarios_backup_v3.db` no Drive.
+Ao ligar uma conta, a aplicação pergunta se deve **manter os dados atuais** ou **procurar uma cópia no Google Drive**. Os envios permanecem pausados até concluir essa escolha. A pesquisa lista os ficheiros de cópia criados por esta aplicação; depois de selecionar um, apresenta a quantidade de registos e as datas antes de pedir confirmação para o carregar. Cancelar não altera os dados.
 
-A exportação local guarda um ficheiro `.db` através do seletor do dispositivo. No Android/iOS o seletor já escreve o conteúdo; não se deve tentar escrever novamente no URI devolvido. O restauro de ficheiros é feito explicitamente pelo menu **Restaurar Base de Dados**. A abertura da aplicação recupera apenas a sessão Google e não substitui os dados locais.
+No menu **Cópias no Google Drive** existem as opções **Enviar cópia agora** e **Cópia automática a cada 24 horas**. O agendamento começa desligado. Ao ativá-lo, envia imediatamente se ainda não houver uma cópia bem-sucedida nas últimas 24 horas. O intervalo e a data do último sucesso ficam guardados entre reinícios, associados à conta. O envio só fica confirmado pela mensagem de sucesso/data do último envio e pelo ficheiro `gestao_horarios_backup_v3.db` no Drive.
 
+No Android, WorkManager verifica periodicamente os envios vencidos com ligação à rede. A verificação ocorre aproximadamente a cada hora e só envia após 24 horas desde o último sucesso; erros não avançam essa data e podem ser repetidos. A abertura/retoma da aplicação também recupera envios em atraso. O sistema pode adiar a execução por poupança de bateria, falta de rede ou encerramento forçado. Não se trata de um alarme com hora exata. Outras plataformas mantêm o envio manual.
+
+Desligar a opção automática ou terminar a sessão cancela o agendamento. Os envios e restauros são serializados entre a aplicação e as tarefas em segundo plano; uma conta diferente não pode receber os dados de uma conta anteriormente configurada. Preferências e estado ficam numa base de controlo separada, que não é substituída por um restauro.
+
+O restauro verifica a integridade e a estrutura da cópia antes de aplicar migrações. A substituição dos registos é uma transação SQLite atómica e é preservada uma cópia local anterior, com sufixo `.before-restore-...`. Falhar ou cancelar não substitui os dados existentes. A abertura da aplicação nunca carrega uma cópia da nuvem sem confirmação.
+
+A exportação local guarda um ficheiro `.db` através do seletor do dispositivo. No Android/iOS o seletor já escreve o conteúdo; não se deve tentar escrever novamente no caminho devolvido. O restauro de um ficheiro escolhido no dispositivo é feito explicitamente pelo menu **Restaurar Base de Dados**.
 ## Publicação Android
 
 A versão do APK vem de `version` no `pubspec.yaml`. Aumentar a versão e o número de compilação em cada Release.

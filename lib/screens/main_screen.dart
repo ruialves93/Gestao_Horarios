@@ -6,6 +6,7 @@ import '../services/update_service.dart';
 import '../helpers/export_helper.dart';
 import 'day_modal.dart';
 import 'settings_modal.dart';
+import 'drive_backup_dialog.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -14,7 +15,7 @@ class MainScreen extends StatefulWidget {
   State<MainScreen> createState() => _MainScreenState();
 }
 
-class _MainScreenState extends State<MainScreen> {
+class _MainScreenState extends State<MainScreen> with WidgetsBindingObserver {
   int _anoAtual = DateTime.now().year;
   int _mesAtual = DateTime.now().month;
 
@@ -26,28 +27,69 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _inicializarApp();
   }
 
-  Future<void> _inicializarApp() async {
-    if (mounted) {
-      await UpdateService.verificarEForcarAtualizacao(context);
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _recuperarCopiasAutomaticas();
+  }
+
+  Future<void> _recuperarCopiasAutomaticas() async {
+    try {
+      await DriveService.instance.recuperarAgendamento();
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Não foi possível agendar as cópias: $e')));
     }
-    await DriveService.recuperarSessaoAoAbrir((msg) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-    });
+  }
+
+  Future<void> _inicializarApp() async {
     await _carregarDados();
+    if (!mounted) return;
+    await UpdateService.verificarEForcarAtualizacao(context);
+    final connected = await DriveService.instance.recuperarSessaoAoAbrir((msg) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
+    });
+    if (!mounted) return;
+    if (connected) {
+      final state = await DriveService.instance.store.read();
+      if (!mounted) return;
+      if (!state.ready ||
+          state.email != DriveService.instance.emailContaAtiva) {
+        await DriveService.instance.pausarParaEscolherDados();
+        if (!mounted) return;
+        await escolherDadosGoogle(context, DriveService.instance);
+        if (mounted) await _carregarDados();
+      }
+    }
+    await _recuperarCopiasAutomaticas();
+    if (mounted) setState(() {});
   }
 
   Future<void> _carregarDados() async {
+    if (!mounted) return;
     setState(() => _carregando = true);
     final perfil = await DatabaseHelper.instance.getPerfil();
-    final registos = await DatabaseHelper.instance.getRegistosMes(_anoAtual, _mesAtual);
-    
+    final registos =
+        await DatabaseHelper.instance.getRegistosMes(_anoAtual, _mesAtual);
+
     // Obter totais gerais acumulados desde sempre da base de dados
     final totaisGerais = await DatabaseHelper.instance.getTotaisGerais();
-    double ganhasGlobal = (totaisGerais['totalGanhas'] as num?)?.toDouble() ?? 0.0;
-    double descontadasGlobal = (totaisGerais['totalDescontadas'] as num?)?.toDouble() ?? 0.0;
+    double ganhasGlobal =
+        (totaisGerais['totalGanhas'] as num?)?.toDouble() ?? 0.0;
+    double descontadasGlobal =
+        (totaisGerais['totalDescontadas'] as num?)?.toDouble() ?? 0.0;
 
     if (!mounted) return;
     setState(() {
@@ -99,123 +141,20 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _abrirCodigoTrabalho() async {
-    final Uri url = Uri.parse('https://diariodarepublica.pt/dr/legislacao-consolidada/-/decreto-lei/2009-72215041');
+    final Uri url = Uri.parse(
+        'https://diariodarepublica.pt/dr/legislacao-consolidada/-/decreto-lei/2009-72215041');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     }
   }
 
-  void _mostrarDialogoGoogleDrive(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setStateDialog) {
-            final autenticado = DriveService.estaAutenticado;
-            final email = DriveService.emailContaAtiva;
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Cópias no Google Drive', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: autenticado ? Colors.green.shade50 : Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: autenticado ? Colors.green.shade300 : Colors.red.shade300),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          autenticado ? Icons.cloud_done : Icons.cloud_off,
-                          color: autenticado ? Colors.green.shade800 : Colors.red.shade800,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                autenticado ? 'Conta Google Ligada' : 'Sem Conta Ligada',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: autenticado ? Colors.green.shade900 : Colors.red.shade900),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                autenticado ? (email ?? 'Ativa') : 'Ligue a conta para guardar cópias',
-                                style: const TextStyle(fontSize: 12, color: Colors.black87),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (!autenticado)
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A237E), foregroundColor: Colors.white),
-                        icon: const Icon(Icons.login),
-                        label: const Text('Ligar à Conta Google'),
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await DriveService.iniciarSessao((msg) {
-                            messenger.showSnackBar(SnackBar(content: Text(msg)));
-                          });
-                          if (!context.mounted) return;
-                          setStateDialog(() {});
-                          _carregarDados();
-                        },
-                      ),
-                    )
-                  else ...[
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
-                        icon: const Icon(Icons.sync),
-                        label: const Text('Enviar cópia para o Drive'),
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          Navigator.pop(ctx);
-                          await DriveService.fazerUploadBackup(onFeedback: (msg) {
-                            messenger.showSnackBar(SnackBar(content: Text(msg)));
-                          });
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton.icon(
-                        style: TextButton.styleFrom(foregroundColor: Colors.red),
-                        icon: const Icon(Icons.logout),
-                        label: const Text('Terminar Sessão Google'),
-                        onPressed: () async {
-                          final messenger = ScaffoldMessenger.of(context);
-                          await DriveService.terminarSessao();
-                          if (!context.mounted) return;
-                          setStateDialog(() {});
-                          messenger.showSnackBar(const SnackBar(content: Text('Sessão Google terminada.')));
-                        },
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fechar')),
-              ],
-            );
-          },
-        );
-      },
-    );
+  Future<void> _mostrarDialogoGoogleDrive(BuildContext context) async {
+    await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => DriveBackupDialog(
+            service: DriveService.instance, onUpdated: _carregarDados));
+    if (mounted) setState(() {});
   }
 
   void _mostrarDialogoExportacaoPdf(BuildContext context) {
@@ -223,12 +162,17 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           titlePadding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           title: const Text(
             'Exportar Relatórios PDF',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF1A237E)),
+            style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 17,
+                color: Color(0xFF1A237E)),
           ),
           content: SizedBox(
             width: double.maxFinite,
@@ -239,14 +183,18 @@ class _MainScreenState extends State<MainScreen> {
                 children: [
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                     leading: const Icon(Icons.assessment, color: Colors.indigo),
-                    title: const Text('Resumo Anual de Rendimentos', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text('Banco de horas e valores de $_anoAtual (Lei n.º 7/2009)'),
+                    title: const Text('Resumo Anual de Rendimentos',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(
+                        'Banco de horas e valores de $_anoAtual (Lei n.º 7/2009)'),
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
-                      final registosAnoLista = await DatabaseHelper.instance.getRegistosAno(_anoAtual);
+                      final registosAnoLista = await DatabaseHelper.instance
+                          .getRegistosAno(_anoAtual);
                       final file = await ExportHelper.gerarPDFResumoAnual(
                         perfil: _perfil,
                         registosAno: registosAnoLista,
@@ -257,7 +205,8 @@ class _MainScreenState extends State<MainScreen> {
                           context: context,
                           tipo: 'Resumo Anual ($_anoAtual)',
                           ficheiro: file,
-                          onFeedback: (msg) => messenger.showSnackBar(SnackBar(content: Text(msg))),
+                          onFeedback: (msg) => messenger
+                              .showSnackBar(SnackBar(content: Text(msg))),
                         );
                       }
                     },
@@ -265,15 +214,20 @@ class _MainScreenState extends State<MainScreen> {
                   const Divider(height: 1),
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                    leading: const Icon(Icons.receipt_long, color: Color(0xFF1A237E)),
-                    title: const Text('Extrato Salarial Detalhado', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Valores diários, extras e descontos do mês'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    leading: const Icon(Icons.receipt_long,
+                        color: Color(0xFF1A237E)),
+                    title: const Text('Extrato Salarial Detalhado',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text(
+                        'Valores diários, extras e descontos do mês'),
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
                       final registosLista = _registosMes.values.toList();
-                      final file = await ExportHelper.gerarPDFValoresReceberDetalhado(
+                      final file =
+                          await ExportHelper.gerarPDFValoresReceberDetalhado(
                         perfil: _perfil,
                         registosMes: registosLista,
                         ano: _anoAtual,
@@ -284,7 +238,8 @@ class _MainScreenState extends State<MainScreen> {
                           context: context,
                           tipo: 'Extrato Salarial ($_mesAtual/$_anoAtual)',
                           ficheiro: file,
-                          onFeedback: (msg) => messenger.showSnackBar(SnackBar(content: Text(msg))),
+                          onFeedback: (msg) => messenger
+                              .showSnackBar(SnackBar(content: Text(msg))),
                         );
                       }
                     },
@@ -292,9 +247,11 @@ class _MainScreenState extends State<MainScreen> {
                   const Divider(height: 1),
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                     leading: const Icon(Icons.schedule, color: Colors.green),
-                    title: const Text('Banco de Horas Mensal', style: TextStyle(fontWeight: FontWeight.w600)),
+                    title: const Text('Banco de Horas Mensal',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
                     subtitle: const Text('Relatório de horas e saldos mensais'),
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
@@ -311,7 +268,8 @@ class _MainScreenState extends State<MainScreen> {
                           context: context,
                           tipo: 'Banco de Horas ($_mesAtual/$_anoAtual)',
                           ficheiro: file,
-                          onFeedback: (msg) => messenger.showSnackBar(SnackBar(content: Text(msg))),
+                          onFeedback: (msg) => messenger
+                              .showSnackBar(SnackBar(content: Text(msg))),
                         );
                       }
                     },
@@ -319,14 +277,19 @@ class _MainScreenState extends State<MainScreen> {
                   const Divider(height: 1),
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                    leading: const Icon(Icons.beach_access, color: Colors.amber),
-                    title: const Text('Mapa de Férias Anual', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text('Calendário detalhado de férias de $_anoAtual'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    leading:
+                        const Icon(Icons.beach_access, color: Colors.amber),
+                    title: const Text('Mapa de Férias Anual',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle:
+                        Text('Calendário detalhado de férias de $_anoAtual'),
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
-                      final registosAnoLista = await DatabaseHelper.instance.getRegistosAno(_anoAtual);
+                      final registosAnoLista = await DatabaseHelper.instance
+                          .getRegistosAno(_anoAtual);
                       final file = await ExportHelper.gerarPDFMapaFerias(
                         perfil: _perfil,
                         registosAno: registosAnoLista,
@@ -337,7 +300,8 @@ class _MainScreenState extends State<MainScreen> {
                           context: context,
                           tipo: 'Mapa de Férias ($_anoAtual)',
                           ficheiro: file,
-                          onFeedback: (msg) => messenger.showSnackBar(SnackBar(content: Text(msg))),
+                          onFeedback: (msg) => messenger
+                              .showSnackBar(SnackBar(content: Text(msg))),
                         );
                       }
                     },
@@ -345,15 +309,21 @@ class _MainScreenState extends State<MainScreen> {
                   const Divider(height: 1),
                   ListTile(
                     dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                    leading: const Icon(Icons.calendar_month, color: Colors.teal),
-                    title: const Text('Calendário Consolidado Anual', style: TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text('Férias, baixas, faltas e horas de $_anoAtual'),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                    leading:
+                        const Icon(Icons.calendar_month, color: Colors.teal),
+                    title: const Text('Calendário Consolidado Anual',
+                        style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle:
+                        Text('Férias, baixas, faltas e horas de $_anoAtual'),
                     onTap: () async {
                       final messenger = ScaffoldMessenger.of(context);
                       Navigator.pop(ctx);
-                      final registosAnoLista = await DatabaseHelper.instance.getRegistosAno(_anoAtual);
-                      final file = await ExportHelper.gerarPDFCalendarioConsolidado(
+                      final registosAnoLista = await DatabaseHelper.instance
+                          .getRegistosAno(_anoAtual);
+                      final file =
+                          await ExportHelper.gerarPDFCalendarioConsolidado(
                         perfil: _perfil,
                         registosAno: registosAnoLista,
                         ano: _anoAtual,
@@ -363,7 +333,8 @@ class _MainScreenState extends State<MainScreen> {
                           context: context,
                           tipo: 'Calendário Consolidado ($_anoAtual)',
                           ficheiro: file,
-                          onFeedback: (msg) => messenger.showSnackBar(SnackBar(content: Text(msg))),
+                          onFeedback: (msg) => messenger
+                              .showSnackBar(SnackBar(content: Text(msg))),
                         );
                       }
                     },
@@ -375,7 +346,8 @@ class _MainScreenState extends State<MainScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Cancelar',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -386,15 +358,30 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final List<String> mesesNomes = [
-      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+      'Janeiro',
+      'Fevereiro',
+      'Março',
+      'Abril',
+      'Maio',
+      'Junho',
+      'Julho',
+      'Agosto',
+      'Setembro',
+      'Outubro',
+      'Novembro',
+      'Dezembro'
     ];
 
-    String nomeTrabalhador = _perfil['nomeTrabalhador']?.isNotEmpty == true ? _perfil['nomeTrabalhador'] : 'Rui Barata';
-    String nomeEmpresa = _perfil['nomeEmpresa']?.isNotEmpty == true ? _perfil['nomeEmpresa'] : 'Gestão de Horários';
+    String nomeTrabalhador = _perfil['nomeTrabalhador']?.isNotEmpty == true
+        ? _perfil['nomeTrabalhador']
+        : 'Rui Barata';
+    String nomeEmpresa = _perfil['nomeEmpresa']?.isNotEmpty == true
+        ? _perfil['nomeEmpresa']
+        : 'Gestão de Horários';
 
     double salarioBase = (_perfil['salarioBase'] as num?)?.toDouble() ?? 1000.0;
-    double valorSubsidioDiario = (_perfil['valorSubsidioAlimentacao'] as num?)?.toDouble() ?? 6.0;
+    double valorSubsidioDiario =
+        (_perfil['valorSubsidioAlimentacao'] as num?)?.toDouble() ?? 6.0;
     double valorHoraBase = salarioBase / 174.0;
 
     double bancoHorasMesGanhas = 0.0;
@@ -415,7 +402,8 @@ class _MainScreenState extends State<MainScreen> {
       }
 
       String tipo = reg['tipoDia']?.toString() ?? 'Trabalho';
-      double hContratadas = (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+      double hContratadas =
+          (reg['horasContratadas'] as num?)?.toDouble() ?? 8.0;
       double hEfetivas = (reg['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
 
       if (tipo == 'Férias') {
@@ -424,7 +412,8 @@ class _MainScreenState extends State<MainScreen> {
         diasFolgasMes++;
       } else if (tipo == 'Falta') {
         diasFaltasMes++;
-        String acaoFaltaTratamento = reg['acaoFaltaTratamento']?.toString() ?? 'Descontar no Salário';
+        String acaoFaltaTratamento =
+            reg['acaoFaltaTratamento']?.toString() ?? 'Descontar no Salário';
         if (acaoFaltaTratamento == 'Descontar no Banco de Horas') {
           bancoHorasMesDescontadas += hContratadas;
         } else {
@@ -436,14 +425,16 @@ class _MainScreenState extends State<MainScreen> {
       } else if (tipo == 'Trabalho') {
         double diff = hEfetivas - hContratadas;
         if (diff > 0.01) {
-          String acaoExcesso = reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
+          String acaoExcesso =
+              reg['acaoExcesso']?.toString() ?? 'Banco de Horas';
           if (acaoExcesso == 'Banco de Horas') {
             bancoHorasMesGanhas += diff;
           } else if (acaoExcesso == 'Pagar') {
             totalValorExtraEuros += diff * valorHoraBase * 1.25;
           }
         } else if (diff < -0.01) {
-          String acaoDefice = reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
+          String acaoDefice =
+              reg['acaoFalta']?.toString() ?? 'Descontar no Banco';
           if (acaoDefice == 'Descontar no Banco') {
             bancoHorasMesDescontadas += diff.abs();
           } else if (acaoDefice == 'Descontar no Salário') {
@@ -451,7 +442,8 @@ class _MainScreenState extends State<MainScreen> {
           }
         }
       } else if (tipo == 'Folga Trabalhada') {
-        String acaoFolga = reg['acaoFolgaTrabalhada']?.toString() ?? 'Banco de Horas';
+        String acaoFolga =
+            reg['acaoFolgaTrabalhada']?.toString() ?? 'Banco de Horas';
         if (acaoFolga == 'Banco de Horas') {
           bancoHorasMesGanhas += hEfetivas;
         } else if (acaoFolga == 'Salário') {
@@ -460,11 +452,16 @@ class _MainScreenState extends State<MainScreen> {
       }
     });
 
-    double totalIliquidoAReceber = salarioBase + totalValorExtraEuros - totalValorDescontosEuros + totalSubsidioEuros;
+    double totalIliquidoAReceber = salarioBase +
+        totalValorExtraEuros -
+        totalValorDescontosEuros +
+        totalSubsidioEuros;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(nomeEmpresa != 'Gestão de Horários' ? '$nomeEmpresa - Gestão' : 'Gestão de Horários'),
+        title: Text(nomeEmpresa != 'Gestão de Horários'
+            ? '$nomeEmpresa - Gestão'
+            : 'Gestão de Horários'),
         backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
         leading: Builder(
@@ -475,7 +472,8 @@ class _MainScreenState extends State<MainScreen> {
                 child: Image.asset(
                   'assets/logo_rb.png',
                   fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, color: Colors.white),
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Icon(Icons.person, color: Colors.white),
                 ),
               ),
             ),
@@ -494,34 +492,44 @@ class _MainScreenState extends State<MainScreen> {
                 child: Image.asset(
                   'assets/logo_rb.png',
                   fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.person, size: 40, color: Colors.white),
+                  errorBuilder: (context, error, stackTrace) =>
+                      const Icon(Icons.person, size: 40, color: Colors.white),
                 ),
               ),
-              accountName: Text(nomeTrabalhador, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              accountName: Text(nomeTrabalhador,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16)),
               accountEmail: Text(nomeEmpresa),
             ),
             _buildSectionHeader('CONTA & SEGURANÇA'),
             ListTile(
               dense: true,
-              leading: const Icon(Icons.person_outline, color: Color(0xFF1A237E)),
-              title: const Text('Configurar Perfil', style: TextStyle(fontWeight: FontWeight.w600)),
+              leading:
+                  const Icon(Icons.person_outline, color: Color(0xFF1A237E)),
+              title: const Text('Configurar Perfil',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Dados pessoais, empresa e remuneração'),
               onTap: () {
                 Navigator.pop(context);
-                SettingsModal.abrirModalPerfil(context: context, perfil: _perfil, onAtualizado: _carregarDados);
+                SettingsModal.abrirModalPerfil(
+                    context: context,
+                    perfil: _perfil,
+                    onAtualizado: _carregarDados);
               },
             ),
             ListTile(
               dense: true,
               leading: const Icon(Icons.lock_outline, color: Color(0xFF1A237E)),
-              title: const Text('Segurança e Código PIN', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('Segurança e Código PIN',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Bloqueio e proteção de acesso'),
               onTap: () {
                 Navigator.pop(context);
                 SettingsModal.abrirModalSeguranca(
                   context: context,
                   perfil: _perfil,
-                  onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg))),
+                  onFeedback: (msg) => ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(msg))),
                   onAtualizado: _carregarDados,
                 );
               },
@@ -531,7 +539,8 @@ class _MainScreenState extends State<MainScreen> {
             ListTile(
               dense: true,
               leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
-              title: const Text('Relatórios e Mapas PDF', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('Relatórios e Mapas PDF',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Resumo anual, extratos e banco de horas'),
               onTap: () {
                 Navigator.pop(context);
@@ -541,8 +550,10 @@ class _MainScreenState extends State<MainScreen> {
             ListTile(
               dense: true,
               leading: const Icon(Icons.menu_book, color: Colors.indigo),
-              title: const Text('Código do Trabalho', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Consulta legislativa oficial (Lei n.º 7/2009)'),
+              title: const Text('Código do Trabalho',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle:
+                  const Text('Consulta legislativa oficial (Lei n.º 7/2009)'),
               onTap: () {
                 Navigator.pop(context);
                 _abrirCodigoTrabalho();
@@ -553,8 +564,11 @@ class _MainScreenState extends State<MainScreen> {
             ListTile(
               dense: true,
               leading: const Icon(Icons.cloud_sync, color: Colors.blue),
-              title: const Text('Cópias no Google Drive', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text(DriveService.estaAutenticado ? (DriveService.emailContaAtiva ?? 'Ligado') : 'Ligar conta para backup na nuvem'),
+              title: const Text('Cópias no Google Drive',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle: Text(DriveService.instance.estaAutenticado
+                  ? (DriveService.instance.emailContaAtiva ?? 'Ligado')
+                  : 'Ligar conta para backup na nuvem'),
               onTap: () {
                 Navigator.pop(context);
                 _mostrarDialogoGoogleDrive(context);
@@ -563,28 +577,35 @@ class _MainScreenState extends State<MainScreen> {
             ListTile(
               dense: true,
               leading: const Icon(Icons.upload_file, color: Colors.teal),
-              title: const Text('Exportar Base de Dados (Local)', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('Exportar Base de Dados (Local)',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Guardar cópia de segurança no dispositivo'),
               onTap: () async {
                 final messenger = ScaffoldMessenger.of(context);
                 Navigator.pop(context);
-                bool ok = await DatabaseHelper.instance.exportarEGuardarBaseDeDados();
+                bool ok =
+                    await DatabaseHelper.instance.exportarEGuardarBaseDeDados();
                 messenger.showSnackBar(SnackBar(
-                  content: Text(ok ? 'Backup exportado com sucesso!' : 'Erro ou cancelado na exportação.'),
+                  content: Text(ok
+                      ? 'Backup exportado com sucesso!'
+                      : 'Erro ou cancelado na exportação.'),
                 ));
               },
             ),
             ListTile(
               dense: true,
               leading: const Icon(Icons.download, color: Colors.orange),
-              title: const Text('Restaurar Base de Dados', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Importar ficheiro .db anteriormente guardado'),
+              title: const Text('Restaurar Base de Dados',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+              subtitle:
+                  const Text('Importar ficheiro .db anteriormente guardado'),
               onTap: () async {
                 Navigator.pop(context);
                 await SettingsModal.executarRestauro(
                   context: context,
                   onAtualizado: _carregarDados,
-                  onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg))),
+                  onFeedback: (msg) => ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(msg))),
                 );
               },
             ),
@@ -592,25 +613,32 @@ class _MainScreenState extends State<MainScreen> {
             _buildSectionHeader('SISTEMA'),
             ListTile(
               dense: true,
-              leading: const Icon(Icons.system_update_rounded, color: Colors.green),
-              title: const Text('Atualizar Aplicação', style: TextStyle(fontWeight: FontWeight.w600)),
+              leading:
+                  const Icon(Icons.system_update_rounded, color: Colors.green),
+              title: const Text('Atualizar Aplicação',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: const Text('Verificar novas versões no GitHub'),
               onTap: () async {
                 Navigator.pop(context);
                 await UpdateService.verificarEForcarAtualizacao(
                   context,
                   manual: true,
-                  onFeedback: (msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg))),
+                  onFeedback: (msg) => ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(msg))),
                 );
               },
             ),
             const Divider(height: 24),
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+              padding:
+                  const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
               child: Text(
                 'Gestão de Horários\nDesenvolvido por Rui Barata © 2026',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500),
               ),
             ),
             const SizedBox(height: 12),
@@ -622,22 +650,35 @@ class _MainScreenState extends State<MainScreen> {
           : Column(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                   color: Colors.indigo.shade50,
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      IconButton(icon: const Icon(Icons.chevron_left, color: Color(0xFF1A237E)), onPressed: () => _mudarMes(-1)),
-                      Text('${mesesNomes[_mesAtual - 1]} $_anoAtual', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
-                      IconButton(icon: const Icon(Icons.chevron_right, color: Color(0xFF1A237E)), onPressed: () => _mudarMes(1)),
+                      IconButton(
+                          icon: const Icon(Icons.chevron_left,
+                              color: Color(0xFF1A237E)),
+                          onPressed: () => _mudarMes(-1)),
+                      Text('${mesesNomes[_mesAtual - 1]} $_anoAtual',
+                          style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF1A237E))),
+                      IconButton(
+                          icon: const Icon(Icons.chevron_right,
+                              color: Color(0xFF1A237E)),
+                          onPressed: () => _mudarMes(1)),
                     ],
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0, vertical: 4.0),
                   child: Card(
                     elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                     child: Padding(
                       padding: const EdgeInsets.all(8.0),
                       child: Column(
@@ -648,36 +689,62 @@ class _MainScreenState extends State<MainScreen> {
                               _buildResumoItem(
                                 'Saldo Banco',
                                 _formatarHoras(_saldoBancoGlobal),
-                                _saldoBancoGlobal >= 0 ? Colors.indigo.shade900 : Colors.orange.shade900,
+                                _saldoBancoGlobal >= 0
+                                    ? Colors.indigo.shade900
+                                    : Colors.orange.shade900,
                               ),
-                              _buildResumoItem('H. Extras Banco', _formatarHoras(bancoHorasMesGanhas), Colors.green.shade800),
-                              _buildResumoItem('H. Desconto Banco', _formatarHoras(-bancoHorasMesDescontadas, incluirSinal: false), Colors.red.shade800),
+                              _buildResumoItem(
+                                  'H. Extras Banco',
+                                  _formatarHoras(bancoHorasMesGanhas),
+                                  Colors.green.shade800),
+                              _buildResumoItem(
+                                  'H. Desconto Banco',
+                                  _formatarHoras(-bancoHorasMesDescontadas,
+                                      incluirSinal: false),
+                                  Colors.red.shade800),
                             ],
                           ),
                           const Divider(height: 8),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              _buildResumoItem('Férias', '${diasFeriasMes}d', const Color(0xFF0288D1)),
-                              _buildResumoItem('Folgas', '${diasFolgasMes}d', const Color(0xFF7B1FA2)),
-                              _buildResumoItem('Faltas', '${diasFaltasMes}d', const Color(0xFFE65100)),
-                              _buildResumoItem('Baixas', '${diasBaixasMes}d', const Color(0xFFC62828)),
+                              _buildResumoItem('Férias', '${diasFeriasMes}d',
+                                  const Color(0xFF0288D1)),
+                              _buildResumoItem('Folgas', '${diasFolgasMes}d',
+                                  const Color(0xFF7B1FA2)),
+                              _buildResumoItem('Faltas', '${diasFaltasMes}d',
+                                  const Color(0xFFE65100)),
+                              _buildResumoItem('Baixas', '${diasBaixasMes}d',
+                                  const Color(0xFFC62828)),
                             ],
                           ),
                           const Divider(height: 8),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceAround,
                             children: [
-                              _buildResumoItem('Salário Base', '${salarioBase.toStringAsFixed(2)} EUR', Colors.black87),
-                              _buildResumoItem('Valor H. Extra', '+${totalValorExtraEuros.toStringAsFixed(2)} EUR', Colors.green.shade900),
-                              _buildResumoItem('Descontos Sal.', '-${totalValorDescontosEuros.toStringAsFixed(2)} EUR', Colors.red.shade900),
-                              _buildResumoItem('Subs. Alim.', '${totalSubsidioEuros.toStringAsFixed(2)} EUR', Colors.brown),
+                              _buildResumoItem(
+                                  'Salário Base',
+                                  '${salarioBase.toStringAsFixed(2)} EUR',
+                                  Colors.black87),
+                              _buildResumoItem(
+                                  'Valor H. Extra',
+                                  '+${totalValorExtraEuros.toStringAsFixed(2)} EUR',
+                                  Colors.green.shade900),
+                              _buildResumoItem(
+                                  'Descontos Sal.',
+                                  '-${totalValorDescontosEuros.toStringAsFixed(2)} EUR',
+                                  Colors.red.shade900),
+                              _buildResumoItem(
+                                  'Subs. Alim.',
+                                  '${totalSubsidioEuros.toStringAsFixed(2)} EUR',
+                                  Colors.brown),
                             ],
                           ),
                           const SizedBox(height: 6),
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: const Color(0xFF1A237E),
                               borderRadius: BorderRadius.circular(6),
@@ -685,10 +752,17 @@ class _MainScreenState extends State<MainScreen> {
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                const Text('TOTAL ILÍQUIDO A RECEBER:', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                                const Text('TOTAL ILÍQUIDO A RECEBER:',
+                                    style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11)),
                                 Text(
                                   '${totalIliquidoAReceber.toStringAsFixed(2)} EUR',
-                                  style: const TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 15),
+                                  style: const TextStyle(
+                                      color: Colors.amberAccent,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15),
                                 ),
                               ],
                             ),
@@ -728,9 +802,13 @@ class _MainScreenState extends State<MainScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(titulo, style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
+        Text(titulo,
+            style: const TextStyle(
+                fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
         const SizedBox(height: 1),
-        Text(valor, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: cor)),
+        Text(valor,
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.bold, color: cor)),
       ],
     );
   }
@@ -745,7 +823,10 @@ class _MainScreenState extends State<MainScreen> {
         .map((d) => Center(
               child: Text(
                 d,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.grey),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    color: Colors.grey),
               ),
             ))
         .toList();
@@ -758,12 +839,14 @@ class _MainScreenState extends State<MainScreen> {
 
     for (int dia = 1; dia <= diasNoMes; dia++) {
       final dataAtual = DateTime(_anoAtual, _mesAtual, dia);
-      String chaveData = "$_anoAtual-${_mesAtual.toString().padLeft(2, '0')}-${dia.toString().padLeft(2, '0')}";
+      String chaveData =
+          "$_anoAtual-${_mesAtual.toString().padLeft(2, '0')}-${dia.toString().padLeft(2, '0')}";
       final reg = _registosMes[chaveData];
 
       String tipoDia = reg?['tipoDia'] ?? '';
       double hEfetivas = (reg?['horasEfetivas'] as num?)?.toDouble() ?? 0.0;
-      double hContratadas = (reg?['horasContratadas'] as num?)?.toDouble() ?? 8.0;
+      double hContratadas =
+          (reg?['horasContratadas'] as num?)?.toDouble() ?? 8.0;
       double diff = hEfetivas - hContratadas;
 
       Color corFundo = Colors.white;
@@ -830,13 +913,15 @@ class _MainScreenState extends State<MainScreen> {
                   children: [
                     Text(
                       '$dia',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 11),
                     ),
                     if (iconeSituacao != null)
                       Icon(iconeSituacao, size: 12, color: corIcone),
                   ],
                 ),
-                if ((tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') && diff.abs() > 0.01)
+                if ((tipoDia == 'Trabalho' || tipoDia == 'Folga Trabalhada') &&
+                    diff.abs() > 0.01)
                   FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
@@ -844,7 +929,9 @@ class _MainScreenState extends State<MainScreen> {
                       style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.bold,
-                        color: diff > 0 ? Colors.green.shade900 : Colors.red.shade900,
+                        color: diff > 0
+                            ? Colors.green.shade900
+                            : Colors.red.shade900,
                       ),
                     ),
                   )

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'screens/main_screen.dart';
 import 'services/database_helper.dart';
 import 'services/auth_service.dart';
+import 'services/backup_scheduler.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,6 +14,11 @@ void main() async {
     DeviceOrientation.portraitDown,
   ]);
 
+  try {
+    await BackupScheduler().initialize();
+  } catch (e) {
+    debugPrint('Não foi possível iniciar o agendamento de cópias: $e');
+  }
   runApp(const GestaoHorariosApp());
 }
 
