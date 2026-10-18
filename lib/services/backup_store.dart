@@ -48,7 +48,8 @@ class BackupStore {
   Future<Database> get database async => _db ??= await openDatabase(
           path ?? p.join(await getDatabasesPath(), 'cloud_backup_control.db'),
           version: 1, onConfigure: (db) async {
-        await db.execute('PRAGMA busy_timeout = 60000');
+        // Este PRAGMA devolve uma linha; o Android exige rawQuery.
+        await db.rawQuery('PRAGMA busy_timeout = 60000');
       }, onCreate: (db, _) async {
         await db.execute(
             'CREATE TABLE settings (id INTEGER PRIMARY KEY, value TEXT NOT NULL)');
