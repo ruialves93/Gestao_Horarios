@@ -33,7 +33,9 @@ class _MainScreenState extends State<MainScreen> {
     if (mounted) {
       await UpdateService.verificarEForcarAtualizacao(context);
     }
-    await DriveService.sincronizarAoAbrir((msg) {});
+    await DriveService.recuperarSessaoAoAbrir((msg) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    });
     await _carregarDados();
   }
 
@@ -107,14 +109,13 @@ class _MainScreenState extends State<MainScreen> {
     showDialog(
       context: context,
       builder: (ctx) {
-        bool autenticado = DriveService.estaAutenticado;
-        String? email = DriveService.emailContaAtiva;
-
         return StatefulBuilder(
           builder: (context, setStateDialog) {
+            final autenticado = DriveService.estaAutenticado;
+            final email = DriveService.emailContaAtiva;
             return AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Google Drive & Sincronização', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
+              title: const Text('Cópias no Google Drive', style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1A237E))),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -143,7 +144,7 @@ class _MainScreenState extends State<MainScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                autenticado ? (email ?? 'Ativa') : 'Toque em Ligar para sincronizar dados',
+                                autenticado ? (email ?? 'Ativa') : 'Ligue a conta para guardar cópias',
                                 style: const TextStyle(fontSize: 12, color: Colors.black87),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -166,6 +167,7 @@ class _MainScreenState extends State<MainScreen> {
                           await DriveService.iniciarSessao((msg) {
                             messenger.showSnackBar(SnackBar(content: Text(msg)));
                           });
+                          if (!context.mounted) return;
                           setStateDialog(() {});
                           _carregarDados();
                         },
@@ -177,7 +179,7 @@ class _MainScreenState extends State<MainScreen> {
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade700, foregroundColor: Colors.white),
                         icon: const Icon(Icons.sync),
-                        label: const Text('Forçar Sincronização Manual'),
+                        label: const Text('Enviar cópia para o Drive'),
                         onPressed: () async {
                           final messenger = ScaffoldMessenger.of(context);
                           Navigator.pop(ctx);
@@ -197,6 +199,7 @@ class _MainScreenState extends State<MainScreen> {
                         onPressed: () async {
                           final messenger = ScaffoldMessenger.of(context);
                           await DriveService.terminarSessao();
+                          if (!context.mounted) return;
                           setStateDialog(() {});
                           messenger.showSnackBar(const SnackBar(content: Text('Sessão Google terminada.')));
                         },
@@ -550,7 +553,7 @@ class _MainScreenState extends State<MainScreen> {
             ListTile(
               dense: true,
               leading: const Icon(Icons.cloud_sync, color: Colors.blue),
-              title: const Text('Google Drive & Sincronização', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: const Text('Cópias no Google Drive', style: TextStyle(fontWeight: FontWeight.w600)),
               subtitle: Text(DriveService.estaAutenticado ? (DriveService.emailContaAtiva ?? 'Ligado') : 'Ligar conta para backup na nuvem'),
               onTap: () {
                 Navigator.pop(context);

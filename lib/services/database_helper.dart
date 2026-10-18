@@ -1,15 +1,18 @@
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'dart:typed_data';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
-  static Database? _database;
+  Database? _database;
 
   DatabaseHelper._init();
+
+  @visibleForTesting
+  DatabaseHelper.forTesting(Database database) : _database = database;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -257,39 +260,40 @@ class DatabaseHelper {
   }
 
   // --- BACKUP E RESTAURO (COM SELETOR DE FICHEIROS NATIVO) ---
- Future<bool> exportarEGuardarBaseDeDados() async {
+  /// Obtém uma cópia consistente, incluindo todas as alterações já guardadas.
+  Future<Uint8List> lerCopiaSeguranca() async {
+    final db = await database;
+    // O ficheiro principal tem de conter os dados, sem depender de um WAL.
+    final mode = await db.rawQuery('PRAGMA journal_mode = DELETE');
+    if (mode.isEmpty || mode.first.values.first.toString().toLowerCase() != 'delete') {
+      throw StateError('Não foi possível preparar a base de dados para cópia.');
+    }
+    return db.transaction((txn) async {
+      await txn.rawQuery('SELECT count(*) FROM sqlite_master');
+      return File(db.path).readAsBytes();
+    }, exclusive: true);
+  }
+
+  Future<bool> exportarEGuardarBaseDeDados() async {
     try {
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gestao_horarios.db');
-      final dbFile = File(path);
-
-      if (!await dbFile.exists()) {
-        return false;
-      }
-
-      // Lê os bytes e converte explicitamente para Uint8List
-      List<int> rawBytes = await dbFile.readAsBytes();
-      Uint8List bytes = Uint8List.fromList(rawBytes); // <--- Corrigido aqui
-
-      // Abre o seletor nativo do sistema para o utilizador escolher onde guardar
-      String? outputFile = await FilePicker.platform.saveFile(
+      final bytes = await lerCopiaSeguranca();
+      final mobile = defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS;
+      final outputFile = await FilePicker.platform.saveFile(
         dialogTitle: 'Guardar Cópia da Base de Dados',
         fileName: 'gestao_horarios_backup_${DateTime.now().toIso8601String().substring(0, 10)}.db',
-        bytes: bytes,
+        bytes: mobile ? bytes : null,
       );
-
-      if (outputFile == null) {
-        return false; // Utilizador cancelou a operação
+      if (outputFile == null) return false;
+      // No Android/iOS o seletor já guardou os bytes e pode devolver um URI.
+      if (!mobile) {
+        await File(outputFile).writeAsBytes(bytes, flush: true);
       }
-
-      File destinationFile = File(outputFile);
-      await destinationFile.writeAsBytes(bytes);
       return true;
     } catch (_) {
       return false;
     }
   }
-
   Future<bool> restaurarBaseDeDados(String caminhoFicheiro) async {
     try {
       final dbPath = await getDatabasesPath();

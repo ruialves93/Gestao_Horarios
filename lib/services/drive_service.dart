@@ -1,9 +1,8 @@
-import 'dart:io';
+import 'package:flutter/services.dart';
+import 'database_helper.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:http/http.dart' as http;
-import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
 
 class GoogleAuthClient extends http.BaseClient {
   final Map<String, String> _headers;
@@ -16,13 +15,18 @@ class GoogleAuthClient extends http.BaseClient {
     request.headers.addAll(_headers);
     return _client.send(request);
   }
+
+  @override
+  void close() {
+    _client.close();
+    super.close();
+  }
 }
 
 class DriveService {
   static final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: <String>[
       drive.DriveApi.driveFileScope,
-      drive.DriveApi.driveAppdataScope,
     ],
   );
 
@@ -38,6 +42,13 @@ class DriveService {
       }
       onFeedback('Sessão iniciada: ${account.email}');
       return true;
+    } on PlatformException catch (e) {
+      if (e.message?.contains('10:') == true || e.message?.contains('ApiException: 10') == true) {
+        onFeedback('A ligação Google não está configurada para esta versão da aplicação (erro 10). Contacte o responsável pela aplicação.');
+      } else {
+        onFeedback('Erro ao ligar a conta Google (${e.code}): ${e.message ?? ''}');
+      }
+      return false;
     } catch (e) {
       onFeedback('Erro ao iniciar sessão: $e');
       return false;
@@ -49,6 +60,7 @@ class DriveService {
   }
 
   static Future<bool> fazerUploadBackup({Function(String)? onFeedback}) async {
+    GoogleAuthClient? client;
     try {
       GoogleSignInAccount? account = _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
       if (account == null) {
@@ -58,20 +70,16 @@ class DriveService {
 
       if (onFeedback != null) onFeedback('A enviar cópia para o Google Drive...');
       final headers = await account.authHeaders;
-      final client = GoogleAuthClient(headers);
+      client = GoogleAuthClient(headers);
       final driveApi = drive.DriveApi(client);
 
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gestao_horarios_v3.db');
-      final localFile = File(path);
-
-      if (!await localFile.exists()) return false;
+      final bytes = await DatabaseHelper.instance.lerCopiaSeguranca();
 
       final fileList = await driveApi.files.list(
         q: "name = 'gestao_horarios_backup_v3.db' and trashed = false",
       );
 
-      var media = drive.Media(localFile.openRead(), localFile.lengthSync());
+      var media = drive.Media(Stream.value(bytes), bytes.length);
       drive.File fileMetadata = drive.File();
       fileMetadata.name = 'gestao_horarios_backup_v3.db';
 
@@ -87,44 +95,18 @@ class DriveService {
     } catch (e) {
       if (onFeedback != null) onFeedback('Erro ao enviar backup: $e');
       return false;
+    } finally {
+      client?.close();
     }
   }
 
-  static Future<bool> sincronizarAoAbrir(Function(String) onFeedback) async {
+  /// Recupera apenas a sessão. Um restauro nunca deve substituir dados ao abrir.
+  static Future<bool> recuperarSessaoAoAbrir(Function(String) onFeedback) async {
     try {
-      GoogleSignInAccount? account = _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
-      if (account == null) return false;
-
-      final headers = await account.authHeaders;
-      final client = GoogleAuthClient(headers);
-      final driveApi = drive.DriveApi(client);
-
-      final fileList = await driveApi.files.list(
-        q: "name = 'gestao_horarios_backup_v3.db' and trashed = false",
-      );
-
-      final dbPath = await getDatabasesPath();
-      final path = join(dbPath, 'gestao_horarios_v3.db');
-
-      if (fileList.files != null && fileList.files!.isNotEmpty) {
-        final fileId = fileList.files!.first.id!;
-        drive.Media media = await driveApi.files.get(
-          fileId,
-          downloadOptions: drive.DownloadOptions.fullMedia,
-        ) as drive.Media;
-
-        final File localFile = File(path);
-        List<int> dataBytes = [];
-        await for (var data in media.stream) {
-          dataBytes.addAll(data);
-        }
-        await localFile.writeAsBytes(dataBytes);
-        onFeedback('Dados sincronizados do Drive (${account.email})');
-      } else {
-        await fazerUploadBackup(onFeedback: onFeedback);
-      }
-      return true;
+      final account = _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
+      return account != null;
     } catch (e) {
+      onFeedback('Não foi possível recuperar a sessão Google: $e');
       return false;
     }
   }

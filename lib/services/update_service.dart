@@ -30,10 +30,7 @@ class UpdateService {
       }
 
       final packageInfo = await PackageInfo.fromPlatform();
-      String versaoAtualStr = packageInfo.version; 
-      if (versaoAtualStr.isEmpty || versaoAtualStr == '1.0.0') {
-        versaoAtualStr = '1.0.3';
-      }
+      final versaoAtualStr = packageInfo.version;
 
       final url = Uri.parse('https://api.github.com/repos/$_githubRepo/releases/latest');
       final response = await http.get(url, headers: {'Accept': 'application/vnd.github.v3+json'});

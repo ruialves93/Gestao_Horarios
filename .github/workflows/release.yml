@@ -1,4 +1,4 @@
-name: Publicar Release APK
+name: Validar APK Android
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Compilar e Criar Release
+    name: Testar e Compilar
     runs-on: ubuntu-latest
 
     steps:
@@ -29,15 +29,12 @@ jobs:
       - name: Instalar Dependências
         run: flutter pub get
 
+      - name: Testar cópias de segurança
+        run: flutter test --no-pub
+
       - name: Compilar APK de Release
         run: flutter build apk --release
 
-      - name: Publicar Release no GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/app/outputs/flutter-apk/app-release.apk
-          name: Versão ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # A assinatura debug de um runner é temporária e muda em cada execução.
+      # As Releases são publicadas manualmente com o APK assinado no computador
+      # de distribuição, preservando o certificado registado no Google OAuth.
